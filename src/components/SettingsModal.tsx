@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   X,
   Volume2,
@@ -9,6 +8,8 @@ import {
   Sliders,
   Type,
   Vibrate,
+  HelpCircle,
+  ChevronRight,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -20,6 +21,7 @@ interface SettingsModalProps {
   onUpdateSettings: (newSettings: Partial<TranslatorSettings>) => void;
   onClearHistory: () => void;
   historyCount: number;
+  onOpenInstructions?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -29,6 +31,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onClearHistory,
   historyCount,
+  onOpenInstructions,
 }) => {
   if (!isOpen) return null;
 
@@ -50,7 +53,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Settings Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Instructions Guide Button */}
+          {onOpenInstructions && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenInstructions();
+              }}
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-slate-800/80 to-slate-800/60 border border-cyan-500/30 hover:border-cyan-400 text-left transition group shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center shrink-0">
+                  <HelpCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-100 group-hover:text-cyan-200">
+                    Instrucciones y Guía de Uso
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Manual en todos los idiomas para modo mesa y voz
+                  </div>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-300 group-hover:translate-x-0.5 transition" />
+            </button>
+          )}
+
           {/* PWA Install Option */}
           <PWAInstallButton variant="settings" />
 

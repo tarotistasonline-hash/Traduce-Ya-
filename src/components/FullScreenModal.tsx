@@ -33,13 +33,13 @@ export const FullScreenModal: React.FC<FullScreenModalProps> = ({
       </div>
 
       {/* Main Massive Translated Text */}
-      <div className="my-auto text-center space-y-6 max-w-3xl mx-auto w-full">
-        <div className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-white leading-tight break-words">
+      <div className="my-auto text-center space-y-4 sm:space-y-6 max-w-3xl mx-auto w-full overflow-y-auto max-h-[70vh] py-2">
+        <div className="text-3xl sm:text-5xl md:text-7xl font-extrabold tracking-tight text-white leading-tight break-words">
           {turn.translatedText}
         </div>
 
         {turn.phonetic && (
-          <div className="text-xl sm:text-2xl text-cyan-300 font-mono">
+          <div className="text-lg sm:text-2xl text-cyan-300 font-mono">
             [{turn.phonetic}]
           </div>
         )}
