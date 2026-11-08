@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="cyan-emerald" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+
+  <!-- Subtle Border -->
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#22d3ee" stroke-width="4" stroke-opacity="0.3" />
+
+  <!-- Central Glow Element -->
+  <circle cx="256" cy="256" r="140" fill="#22d3ee" opacity="0.08" filter="url(#glow)" />
+
+  <!-- Dual Conversational Speech Waveforms / Chat Bubbles -->
+  <!-- Top-left speaker bubble -->
+  <path d="M120 180 C120 135 155 100 200 100 L300 100 C345 100 380 135 380 180 C380 225 345 260 300 260 L230 260 L180 300 L190 260 L200 260 C155 260 120 225 120 180 Z" fill="#1e293b" stroke="#38bdf8" stroke-width="8" />
+
+  <!-- Sound Waves inside bubble -->
+  <rect x="190" y="160" width="12" height="40" rx="6" fill="#38bdf8" />
+  <rect x="220" y="140" width="12" height="80" rx="6" fill="#22d3ee" />
+  <rect x="250" y="125" width="12" height="110" rx="6" fill="url(#cyan-emerald)" />
+  <rect x="280" y="140" width="12" height="80" rx="6" fill="#34d399" />
+  <rect x="310" y="160" width="12" height="40" rx="6" fill="#10b981" />
+
+  <!-- Bottom-right partner bubble -->
+  <path d="M392 332 C392 377 357 412 312 412 L212 412 C167 412 132 377 132 332 C132 287 167 252 212 252 L282 252 L332 212 L322 252 L312 252 C357 252 392 287 392 332 Z" fill="#0f172a" stroke="#10b981" stroke-width="7" opacity="0.9" />
+
+  <!-- Translation arrows in center bottom -->
+  <g transform="translate(226, 310)">
+    <circle cx="30" cy="22" r="32" fill="#0284c7" />
+    <path d="M18 18 L42 18 M36 12 L42 18 L36 24 M42 26 L18 26 M24 20 L18 26 L24 32" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

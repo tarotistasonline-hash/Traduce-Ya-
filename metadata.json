@@ -1,0 +1,6 @@
+{
+  "name": "Traductor Ya - Traductor de Voz y Conversación",
+  "description": "Traductor simultáneo por voz y audio para conversaciones cara a cara y manos libres en cualquier idioma.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
