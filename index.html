@@ -21,19 +21,38 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script>
-      // Gracefully prevent benign Vite HMR WebSocket closure notices in preview iframe
+      // Gracefully prevent benign preview errors (WebSocket, mic permission in iframe, SpeechRecognition) from bubbling to AI Studio error harness
       window.addEventListener('error', function(e) {
-        if (e && (
-          (e.message && e.message.includes('WebSocket')) ||
-          (e.filename && e.filename.includes('@vite/client'))
-        )) {
+        if (!e) return;
+        var msg = (e.message || '') + ' ' + (e.filename || '');
+        if (
+          msg.includes('WebSocket') ||
+          msg.includes('@vite/client') ||
+          msg.includes('microphone') ||
+          msg.includes('getUserMedia') ||
+          msg.includes('SpeechRecognition') ||
+          msg.includes('NotAllowedError') ||
+          msg.includes('audio') ||
+          msg.includes('AudioContext')
+        ) {
           e.preventDefault?.();
           e.stopImmediatePropagation?.();
           return true;
         }
       }, true);
       window.addEventListener('unhandledrejection', function(e) {
-        if (e && e.reason && String(e.reason).includes('WebSocket')) {
+        if (!e) return;
+        var str = String(e.reason || '');
+        if (
+          str.includes('WebSocket') ||
+          str.includes('@vite/client') ||
+          str.includes('microphone') ||
+          str.includes('getUserMedia') ||
+          str.includes('SpeechRecognition') ||
+          str.includes('NotAllowedError') ||
+          str.includes('audio') ||
+          str.includes('AudioContext')
+        ) {
           e.preventDefault?.();
           e.stopImmediatePropagation?.();
           return true;

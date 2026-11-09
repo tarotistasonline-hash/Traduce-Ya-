@@ -10,6 +10,7 @@ import {
   Check,
   Radio,
   HelpCircle,
+  Keyboard,
 } from 'lucide-react';
 import { Language, ConversationTurn } from '../types/translator';
 import { AudioWaveform } from './AudioWaveform';
@@ -35,6 +36,7 @@ interface FaceToFaceViewProps {
   onOpenUserLangModal: () => void;
   onOpenPartnerLangModal: () => void;
   onOpenFullScreen: (turn: ConversationTurn) => void;
+  onOpenTextInput?: (speaker: 'user' | 'partner') => void;
 }
 
 export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
@@ -58,6 +60,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
   onOpenUserLangModal,
   onOpenPartnerLangModal,
   onOpenFullScreen,
+  onOpenTextInput,
 }) => {
   const [partnerFlipped, setPartnerFlipped] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -230,8 +233,10 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
         </div>
 
         {/* Partner Mic Button */}
-        <div className="flex items-center justify-center z-10 shrink-0 pt-1">
+        <div className="flex flex-col items-center justify-center z-10 shrink-0 pt-1">
           <button
+            type="button"
+            aria-label={isListeningPartner ? "Detener audio interlocutor" : "Hablar interlocutor"}
             onClick={isListeningPartner ? onStopPartnerSpeech : onStartPartnerSpeech}
             className={`relative group flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full transition-all duration-200 shadow-xl ${
               isListeningPartner
@@ -248,6 +253,9 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               <Mic className="w-6 h-6 sm:w-7 sm:h-7" />
             )}
           </button>
+          <span className="text-[10px] font-semibold text-cyan-300 mt-0.5 tracking-tight">
+            Audio Interlocutor
+          </span>
         </div>
       </div>
 
@@ -403,8 +411,10 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
         </div>
 
         {/* User Mic Button */}
-        <div className="flex items-center justify-center z-10 shrink-0 pt-1">
+        <div className="flex flex-col items-center justify-center z-10 shrink-0 pt-1">
           <button
+            type="button"
+            aria-label={isListeningUser ? "Detener tu audio" : "Hablar en tu idioma"}
             onClick={isListeningUser ? onStopUserSpeech : onStartUserSpeech}
             className={`relative group flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full transition-all duration-200 shadow-xl ${
               isListeningUser
@@ -421,6 +431,9 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               <Mic className="w-6 h-6 sm:w-7 sm:h-7" />
             )}
           </button>
+          <span className="text-[10px] font-semibold text-emerald-300 mt-0.5 tracking-tight">
+            Tu Audio (Hablar)
+          </span>
         </div>
       </div>
     </div>

@@ -23,6 +23,7 @@ if (apiKey) {
   ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
+      apiVersion: 'v1beta',
       headers: {
         'User-Agent': 'aistudio-build',
       },
@@ -49,6 +50,7 @@ app.get('/api/status', (req, res) => {
     status: 'ok',
   });
 });
+
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
@@ -96,10 +98,10 @@ Respond ONLY with valid JSON in this schema:
 }`;
 
     const candidateModels = [
-      'gemini-3.8-flash',
       'gemini-2.5-flash',
       'gemini-flash-latest',
       'gemini-3.1-flash-lite',
+      'gemini-3.8-flash',
     ];
 
     let response: any = null;
@@ -199,15 +201,36 @@ Respond strictly with a JSON object:
   "phonetic": "phonetic guide for translated text or empty string"
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: {
-        parts: [audioPart, { text: promptText }],
-      },
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
+    const audioModels = [
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+      'gemini-3.1-flash-lite',
+      'gemini-3.8-flash',
+    ];
+
+    let response: any = null;
+    let lastError: any = null;
+
+    for (const model of audioModels) {
+      try {
+        response = await ai.models.generateContent({
+          model,
+          contents: [audioPart, { text: promptText }],
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
+        if (response && response.text) {
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+
+    if (!response || !response.text) {
+      throw lastError || new Error('No se pudo procesar el audio.');
+    }
 
     const rawText = response.text || '{}';
     let data;

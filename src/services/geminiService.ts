@@ -58,13 +58,16 @@ export async function translateAudioBlob(
   fromLang: string,
   toLang: string
 ): Promise<AudioTranslateResponse> {
-  const buffer = await audioBlob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const audioBase64 = btoa(binary);
+  const audioBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(audioBlob);
+  });
 
   const res = await fetch('/api/translate-audio', {
     method: 'POST',

@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Keyboard,
   AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 
 import {
@@ -32,7 +33,11 @@ import {
   AUTO_DETECT_LANGUAGE,
   matchLanguageByNameOrIso,
 } from './data/languages';
-import { translateText, generateAiSpeech } from './services/geminiService';
+import {
+  translateText,
+  translateAudioBlob,
+  generateAiSpeech,
+} from './services/geminiService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 
@@ -133,6 +138,75 @@ export default function App() {
 
   // Current language for recognition depending on who is talking
   const currentListeningLang = activeSpeaker === 'user' ? userLang.code : partnerLang.code;
+
+  const activeSpeakerRef = useRef<'user' | 'partner' | null>(null);
+  activeSpeakerRef.current = activeSpeaker;
+
+  const handleProcessSpeechRef = useRef<(text: string, speaker: 'user' | 'partner') => void>(() => {});
+  const handleProcessAudioRef = useRef<(blob: Blob, speaker: 'user' | 'partner') => void>(() => {});
+  const handleStartListeningRef = useRef<(speaker: 'user' | 'partner') => void>(() => {});
+
+  // Speech Recognition Hook
+  const {
+    isListening,
+    isSupported,
+    audioLevel,
+    startListening,
+    stopListening,
+  } = useSpeechRecognition({
+    lang: currentListeningLang,
+    onResult: (text) => {
+      setInterimText(text);
+    },
+    onFinalText: (text) => {
+      const speaker = activeSpeakerRef.current;
+      if (speaker && text.trim()) {
+        handleProcessSpeechRef.current(text.trim(), speaker);
+      }
+    },
+    onAudioRecorded: (blob) => {
+      const speaker = activeSpeakerRef.current || 'user';
+      handleProcessAudioRef.current(blob, speaker);
+    },
+    onEnd: () => {
+      setActiveSpeaker(null);
+      setInterimText('');
+    },
+    onError: (err) => {
+      console.warn('Speech rec error:', err);
+      setActiveSpeaker(null);
+      setInterimText('');
+      if (err === 'not-allowed') {
+        setStatusAlert({
+          message: 'Permiso de micrófono no concedido en el navegador.',
+          type: 'error',
+        });
+        setTimeout(() => setStatusAlert(null), 6000);
+      }
+    },
+  });
+
+  const handleStartListening = useCallback(
+    async (speaker: 'user' | 'partner') => {
+      try {
+        stopSpeaking();
+        setActiveSpeaker(speaker);
+        activeSpeakerRef.current = speaker;
+        const targetLang = speaker === 'user' ? userLang.code : partnerLang.code;
+        await startListening(targetLang);
+      } catch (err) {
+        console.warn('handleStartListening caught error safely:', err);
+      }
+    },
+    [partnerLang.code, startListening, stopSpeaking, userLang.code]
+  );
+  handleStartListeningRef.current = handleStartListening;
+
+  const handleStopListening = useCallback(() => {
+    setActiveSpeaker(null);
+    activeSpeakerRef.current = null;
+    stopListening();
+  }, [stopListening]);
 
   // Handle final speech text and translate
   const handleProcessSpeech = useCallback(
@@ -248,66 +322,101 @@ export default function App() {
         if (isContinuous) {
           const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
           setTimeout(() => {
-            setActiveSpeaker(nextSpeaker);
+            handleStartListeningRef.current(nextSpeaker);
           }, 3000);
         }
       } catch (err) {
-        console.error('Translation workflow error:', err);
+        console.warn('Translation workflow notice:', err);
       } finally {
         setIsTranslating(false);
       }
     },
     [isContinuous, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
   );
+  handleProcessSpeechRef.current = handleProcessSpeech;
 
-  const activeSpeakerRef = useRef<'user' | 'partner' | null>(null);
-  activeSpeakerRef.current = activeSpeaker;
+  // Audio Multimodal Direct Translation
+  const handleProcessAudio = useCallback(
+    async (audioBlob: Blob, speaker: 'user' | 'partner') => {
+      setIsTranslating(true);
+      setInterimText('Traduciendo audio...');
 
-  // Speech Recognition Hook
-  const {
-    isListening,
-    isSupported,
-    audioLevel,
-    startListening,
-    stopListening,
-  } = useSpeechRecognition({
-    lang: currentListeningLang,
-    onResult: (text) => {
-      setInterimText(text);
-    },
-    onFinalText: (text) => {
-      const speaker = activeSpeakerRef.current;
-      if (speaker && text.trim()) {
-        handleProcessSpeech(text.trim(), speaker);
-      }
-    },
-    onEnd: () => {
-      setActiveSpeaker(null);
-      setInterimText('');
-    },
-    onError: (err) => {
-      console.warn('Speech rec error:', err);
-      setActiveSpeaker(null);
-      setInterimText('');
-      if (err === 'not-allowed') {
+      const sourceLanguage = speaker === 'user' ? userLang : partnerLang;
+      const targetLanguage = speaker === 'user' ? partnerLang : userLang;
+
+      const fromLangParam =
+        sourceLanguage.code === 'auto' ? 'Auto-detect' : sourceLanguage.name;
+      const toLangParam =
+        targetLanguage.code === 'auto'
+          ? speaker === 'user'
+            ? 'English'
+            : 'Español'
+          : targetLanguage.name;
+
+      try {
+        const result = await translateAudioBlob(audioBlob, fromLangParam, toLangParam);
+
+        if (result.detectedLanguage) {
+          if (speaker === 'partner') {
+            setLastDetectedPartnerLang(result.detectedLanguage);
+          } else {
+            setLastDetectedUserLang(result.detectedLanguage);
+          }
+        }
+
+        let targetSpeechCode = targetLanguage.code;
+        if (!targetSpeechCode || targetSpeechCode === 'auto') {
+          const matched = matchLanguageByNameOrIso(toLangParam);
+          targetSpeechCode = matched ? matched.code : 'es-ES';
+        }
+
+        const newTurn: ConversationTurn = {
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          speaker,
+          originalText: result.transcribedText || 'Audio recibido',
+          translatedText: result.translatedText,
+          sourceLang: sourceLanguage.code,
+          targetLang: targetSpeechCode,
+          detectedLanguage: result.detectedLanguage,
+          phonetic: result.phonetic,
+          timestamp: Date.now(),
+        };
+
+        setTurns((prev) => [newTurn, ...prev]);
+
+        // Auto speak translation immediately!
+        if (settings.autoSpeak) {
+          speak(result.translatedText, targetSpeechCode, {
+            speed: settings.voiceSpeed,
+            preferAi: settings.useAiVoice,
+          });
+        }
+
+        if (settings.hapticFeedback && 'vibrate' in navigator) {
+          navigator.vibrate?.([60]);
+        }
+
+        if (isContinuous) {
+          const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
+          setTimeout(() => {
+            handleStartListeningRef.current(nextSpeaker);
+          }, 2500);
+        }
+      } catch (err: any) {
+        console.warn('Audio translation notice:', err);
         setStatusAlert({
-          message: 'Permiso de micrófono no concedido. Permite el acceso o usa el botón "Escribir".',
+          message: 'Error al procesar el audio. Por favor intenta de nuevo.',
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 6000);
+        setTimeout(() => setStatusAlert(null), 4000);
+      } finally {
+        setIsTranslating(false);
+        setInterimText('');
       }
     },
-  });
-
-  // Watch activeSpeaker change to trigger/stop listening
-  useEffect(() => {
-    if (activeSpeaker) {
-      stopSpeaking();
-      startListening();
-    } else {
-      stopListening();
-    }
-  }, [activeSpeaker, startListening, stopListening, stopSpeaking]);
+    [isContinuous, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceSpeed, speak, userLang]
+  );
+  handleProcessAudioRef.current = handleProcessAudio;
 
   // Language Swap
   const handleSwapLanguages = () => {
@@ -356,6 +465,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setViewMode('chat')}
+            title="Conversación bidireccional"
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               viewMode === 'chat'
                 ? 'bg-cyan-500 text-slate-950 shadow-sm'
@@ -363,8 +473,8 @@ export default function App() {
             }`}
           >
             <List className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Historial</span>
-            <span className="sm:hidden">Chat</span>
+            <span className="hidden sm:inline">Conversación Bidireccional</span>
+            <span className="sm:hidden">Conversación</span>
           </button>
         </div>
 
@@ -397,11 +507,44 @@ export default function App() {
           >
             <Settings className="w-4 h-4" />
           </button>
+
+          <a
+            href={typeof window !== 'undefined' ? window.location.href : '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
+            title="Abrir app en pestaña independiente (fuera de AI Studio)"
+          >
+            <ExternalLink className="w-4 h-4 text-cyan-400" />
+            <span className="hidden xl:inline">Nueva pestaña</span>
+          </a>
         </div>
       </header>
 
       {/* Offline Status Indicator */}
       <OfflineIndicator />
+
+      {/* Alert toast notification */}
+      {statusAlert && (
+        <div
+          className={`px-3 py-1.5 text-xs flex items-center justify-between z-40 border-b animate-fade-in shrink-0 ${
+            statusAlert.type === 'error'
+              ? 'bg-rose-950/90 text-rose-200 border-rose-500/40'
+              : 'bg-emerald-950/90 text-emerald-200 border-emerald-500/40'
+          }`}
+        >
+          <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{statusAlert.message}</span>
+          </div>
+          <button
+            onClick={() => setStatusAlert(null)}
+            className="text-[10px] uppercase font-mono px-1 py-0.5 ml-2 hover:opacity-80 shrink-0"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Proximity / Table Guidance Banner */}
       {!bannerDismissed && (
@@ -497,10 +640,10 @@ export default function App() {
             interimText={interimText}
             isTranslating={isTranslating}
             isSpeaking={isSpeaking}
-            onStartUserSpeech={() => setActiveSpeaker('user')}
-            onStopUserSpeech={() => setActiveSpeaker(null)}
-            onStartPartnerSpeech={() => setActiveSpeaker('partner')}
-            onStopPartnerSpeech={() => setActiveSpeaker(null)}
+            onStartUserSpeech={() => handleStartListening('user')}
+            onStopUserSpeech={handleStopListening}
+            onStartPartnerSpeech={() => handleStartListening('partner')}
+            onStopPartnerSpeech={handleStopListening}
             onToggleContinuous={() => setIsContinuous((prev) => !prev)}
             onSpeakText={(text, langCode, cachedAudio) =>
               speak(text, langCode, {
@@ -512,6 +655,10 @@ export default function App() {
             onOpenUserLangModal={() => setIsUserLangModalOpen(true)}
             onOpenPartnerLangModal={() => setIsPartnerLangModalOpen(true)}
             onOpenFullScreen={(turn) => setFullScreenTurn(turn)}
+            onOpenTextInput={(speaker) => {
+              setTextInputSpeaker(speaker);
+              setIsTextInputOpen(true);
+            }}
           />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden">
@@ -539,7 +686,7 @@ export default function App() {
               <div className="flex flex-col items-center">
                 <button
                   onClick={() =>
-                    setActiveSpeaker((prev) => (prev === 'user' ? null : 'user'))
+                    activeSpeaker === 'user' ? handleStopListening() : handleStartListening('user')
                   }
                   className={`relative flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full transition-all duration-200 shadow-xl ${
                     activeSpeaker === 'user'
@@ -583,7 +730,7 @@ export default function App() {
               <div className="flex flex-col items-center">
                 <button
                   onClick={() =>
-                    setActiveSpeaker((prev) => (prev === 'partner' ? null : 'partner'))
+                    activeSpeaker === 'partner' ? handleStopListening() : handleStartListening('partner')
                   }
                   className={`relative flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full transition-all duration-200 shadow-xl ${
                     activeSpeaker === 'partner'
@@ -663,6 +810,17 @@ export default function App() {
             cachedAudioBase64: cachedAudio,
           })
         }
+      />
+
+      <TextInputModal
+        isOpen={isTextInputOpen}
+        onClose={() => setIsTextInputOpen(false)}
+        userLang={userLang}
+        partnerLang={partnerLang}
+        defaultSpeaker={textInputSpeaker}
+        onSubmitText={(text, speaker) => {
+          handleProcessSpeech(text, speaker);
+        }}
       />
     </div>
   );
