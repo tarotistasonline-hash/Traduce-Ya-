@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -22,13 +23,24 @@ if (apiKey) {
   ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
-      apiVersion: 'v1alpha',
       headers: {
         'User-Agent': 'aistudio-build',
       },
     },
   });
 }
+
+const aiTts = apiKey
+  ? new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        apiVersion: 'v1alpha',
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
 
 // Health check / status
 app.get('/api/status', (req, res) => {
@@ -83,13 +95,47 @@ Respond ONLY with valid JSON in this schema:
   "alternatives": ["string"]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
+    const candidateModels = [
+      'gemini-3.8-flash',
+      'gemini-2.5-flash',
+      'gemini-flash-latest',
+      'gemini-3.1-flash-lite',
+    ];
+
+    let response: any = null;
+    let lastError: any = null;
+
+    for (const model of candidateModels) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+          if (response && response.text) {
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[Translate] Model ${model} (attempt ${attempt + 1}) error:`, err?.status || err?.message || err);
+          lastError = err;
+          // If 503, brief pause before retry or next model
+          if (attempt === 0 && (String(err?.message).includes('503') || err?.status === 503)) {
+            await new Promise((r) => setTimeout(r, 400));
+          }
+        }
+      }
+      if (response && response.text) {
+        break;
+      }
+    }
+
+    if (!response || !response.text) {
+      console.error('[Translate] All models failed. Last error:', lastError);
+      throw lastError || new Error('No se pudo traducir con los modelos disponibles.');
+    }
 
     const rawText = response.text || '{}';
     let data;
@@ -195,7 +241,8 @@ app.post('/api/tts', async (req, res) => {
       return res.status(400).json({ error: 'Text is required for TTS.' });
     }
 
-    if (!ai) {
+    const ttsClient = aiTts || ai;
+    if (!ttsClient) {
       return res.status(503).json({ error: 'Servicio de voz no disponible.' });
     }
 
@@ -203,7 +250,7 @@ app.post('/api/tts', async (req, res) => {
     const allowedVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
     const chosenVoice = allowedVoices.includes(voiceName) ? voiceName : 'Kore';
 
-    const response = await ai.models.generateContent({
+    const response = await ttsClient.models.generateContent({
       model: 'gemini-3.8-flash-lite-tts',
       contents: text.slice(0, 500),
       config: {
@@ -237,11 +284,15 @@ app.post('/api/tts', async (req, res) => {
 
 async function startServer() {
   const isDev = process.env.NODE_ENV !== 'production';
+  const httpServer = http.createServer(app);
 
   if (isDev) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -253,7 +304,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Traductor Ya server running on http://localhost:${PORT}`);
   });
 }

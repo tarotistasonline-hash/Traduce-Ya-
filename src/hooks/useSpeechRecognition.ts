@@ -11,7 +11,8 @@ declare global {
 
 interface UseSpeechRecognitionOptions {
   lang: string;
-  onResult: (finalText: string, isInterim: boolean) => void;
+  onResult: (currentText: string, isInterim: boolean) => void;
+  onFinalText?: (finalText: string) => void;
   onEnd?: () => void;
   onError?: (error: string) => void;
   silenceTimeoutMs?: number;
@@ -20,6 +21,7 @@ interface UseSpeechRecognitionOptions {
 export function useSpeechRecognition({
   lang,
   onResult,
+  onFinalText,
   onEnd,
   onError,
   silenceTimeoutMs = 1800,
@@ -29,16 +31,33 @@ export function useSpeechRecognition({
   const [interimText, setInterimText] = useState('');
   const [audioLevel, setAudioLevel] = useState(0); // 0 to 100
 
+  // Callback refs to completely eliminate React stale closures
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
+
+  const onFinalTextRef = useRef(onFinalText);
+  onFinalTextRef.current = onFinalText;
+
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
+
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  const currentLangRef = useRef(lang);
+  currentLangRef.current = lang;
+
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<any>(null);
-  const currentLangRef = useRef(lang);
-  const accumulatedTextRef = useRef('');
 
-  currentLangRef.current = lang;
+  // Transcript tracking
+  const accumulatedTextRef = useRef('');
+  const latestTranscriptRef = useRef('');
+  const hasDispatchedRef = useRef(false);
 
   useEffect(() => {
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -98,7 +117,6 @@ export function useSpeechRecognition({
           sum += dataArray[i];
         }
         const average = sum / bufferLength;
-        // Normalize 0 to 100 with a slight boost for quiet distant voices
         const level = Math.min(100, Math.round((average / 128) * 100 * 1.4));
         setAudioLevel(level);
 
@@ -107,7 +125,7 @@ export function useSpeechRecognition({
 
       updateLevel();
     } catch (err) {
-      console.warn('Could not access microphone volume analyser:', err);
+      console.warn('Audio volume analyser error:', err);
     }
   }, []);
 
@@ -118,9 +136,21 @@ export function useSpeechRecognition({
     }
   }, []);
 
+  // Safe dispatcher that ensures text is dispatched once per utterance
+  const dispatchFinalTranscript = useCallback(() => {
+    const textToSubmit = latestTranscriptRef.current.trim();
+    if (textToSubmit && !hasDispatchedRef.current) {
+      hasDispatchedRef.current = true;
+      onFinalTextRef.current?.(textToSubmit);
+    }
+  }, []);
+
   const stopListening = useCallback(() => {
     clearSilenceTimer();
     stopAudioLevelAnalysis();
+
+    // If there is pending speech that hasn't been submitted, dispatch it now
+    dispatchFinalTranscript();
 
     if (recognitionRef.current) {
       try {
@@ -131,28 +161,37 @@ export function useSpeechRecognition({
     }
     setIsListening(false);
     setInterimText('');
-  }, [clearSilenceTimer, stopAudioLevelAnalysis]);
+  }, [clearSilenceTimer, dispatchFinalTranscript, stopAudioLevelAnalysis]);
 
   const startListening = useCallback(() => {
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) {
-      onError?.('El reconocimiento por voz no es compatible con este navegador.');
+      onErrorRef.current?.('El reconocimiento por voz no es compatible con este navegador.');
       return;
     }
 
     // Stop any existing session
-    stopListening();
+    clearSilenceTimer();
+    stopAudioLevelAnalysis();
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+
     accumulatedTextRef.current = '';
+    latestTranscriptRef.current = '';
+    hasDispatchedRef.current = false;
     setInterimText('');
 
     try {
       const recognition = new SpeechRec();
       const targetLang = currentLangRef.current;
-      // When 'auto', use the device's locale so the engine captures natural phonetics
       const effectiveLang =
         !targetLang || targetLang === 'auto'
           ? (typeof navigator !== 'undefined' && navigator.language) || 'es-ES'
           : targetLang;
+
       recognition.lang = effectiveLang;
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -165,31 +204,38 @@ export function useSpeechRecognition({
 
       recognition.onresult = (event: any) => {
         let interim = '';
-        let final = '';
+        let finalSegment = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            final += transcript + ' ';
+            finalSegment += transcript + ' ';
           } else {
             interim += transcript;
           }
         }
 
-        if (final.trim()) {
-          accumulatedTextRef.current += (accumulatedTextRef.current ? ' ' : '') + final.trim();
+        if (finalSegment.trim()) {
+          accumulatedTextRef.current +=
+            (accumulatedTextRef.current ? ' ' : '') + finalSegment.trim();
         }
 
-        setInterimText(interim || accumulatedTextRef.current);
-        onResult(accumulatedTextRef.current || interim, !final);
+        const combinedText = (
+          accumulatedTextRef.current + (interim ? ' ' + interim : '')
+        ).trim();
+
+        latestTranscriptRef.current = combinedText;
+        setInterimText(combinedText);
+        onResultRef.current(combinedText, !finalSegment);
 
         // Reset silence timer: when speaker stops talking for silenceTimeoutMs, finalize
         clearSilenceTimer();
         silenceTimerRef.current = setTimeout(() => {
-          const textToSubmit = (accumulatedTextRef.current || interim).trim();
+          const textToSubmit = latestTranscriptRef.current.trim();
           if (textToSubmit) {
+            dispatchFinalTranscript();
             stopListening();
-            onEnd?.();
+            onEndRef.current?.();
           }
         }, silenceTimeoutMs);
       };
@@ -197,7 +243,7 @@ export function useSpeechRecognition({
       recognition.onerror = (event: any) => {
         console.warn('SpeechRecognition error:', event.error);
         if (event.error !== 'no-speech') {
-          onError?.(event.error);
+          onErrorRef.current?.(event.error);
         }
       };
 
@@ -205,22 +251,21 @@ export function useSpeechRecognition({
         setIsListening(false);
         stopAudioLevelAnalysis();
         clearSilenceTimer();
-        onEnd?.();
+        dispatchFinalTranscript();
+        onEndRef.current?.();
       };
 
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err: any) {
       console.error('Failed to start speech recognition:', err);
-      onError?.(err.message || 'No se pudo iniciar el micrófono');
+      onErrorRef.current?.(err.message || 'No se pudo iniciar el micrófono');
       setIsListening(false);
       stopAudioLevelAnalysis();
     }
   }, [
     clearSilenceTimer,
-    onError,
-    onEnd,
-    onResult,
+    dispatchFinalTranscript,
     silenceTimeoutMs,
     startAudioLevelAnalysis,
     stopAudioLevelAnalysis,

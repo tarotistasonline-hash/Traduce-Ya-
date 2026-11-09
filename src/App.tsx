@@ -16,6 +16,8 @@ import {
   List,
   SplitSquareVertical,
   HelpCircle,
+  Keyboard,
+  AlertCircle,
 } from 'lucide-react';
 
 import {
@@ -44,6 +46,7 @@ import { AudioWaveform } from './components/AudioWaveform';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InstructionsModal } from './components/InstructionsModal';
+import { TextInputModal } from './components/TextInputModal';
 
 const STORAGE_KEY_TURNS = 'traductor_ya_turns_v1';
 const STORAGE_KEY_SETTINGS = 'traductor_ya_settings_v1';
@@ -98,6 +101,9 @@ export default function App() {
   const [isQuickPhrasesOpen, setIsQuickPhrasesOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isInstructionsOpen, setIsInstructionsOpen] = useState(false);
+  const [isTextInputOpen, setIsTextInputOpen] = useState(false);
+  const [textInputSpeaker, setTextInputSpeaker] = useState<'user' | 'partner'>('user');
+  const [statusAlert, setStatusAlert] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null);
   const [fullScreenTurn, setFullScreenTurn] = useState<ConversationTurn | null>(null);
 
   // Save history
@@ -254,6 +260,9 @@ export default function App() {
     [isContinuous, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
   );
 
+  const activeSpeakerRef = useRef<'user' | 'partner' | null>(null);
+  activeSpeakerRef.current = activeSpeaker;
+
   // Speech Recognition Hook
   const {
     isListening,
@@ -263,24 +272,30 @@ export default function App() {
     stopListening,
   } = useSpeechRecognition({
     lang: currentListeningLang,
-    onResult: (text, isInterim) => {
+    onResult: (text) => {
       setInterimText(text);
-      if (!isInterim) {
-        if (activeSpeaker) {
-          handleProcessSpeech(text, activeSpeaker);
-        }
+    },
+    onFinalText: (text) => {
+      const speaker = activeSpeakerRef.current;
+      if (speaker && text.trim()) {
+        handleProcessSpeech(text.trim(), speaker);
       }
     },
     onEnd: () => {
-      // If we had text captured in interim, finalize it
-      if (interimText.trim() && activeSpeaker) {
-        handleProcessSpeech(interimText, activeSpeaker);
-      }
       setActiveSpeaker(null);
+      setInterimText('');
     },
     onError: (err) => {
       console.warn('Speech rec error:', err);
       setActiveSpeaker(null);
+      setInterimText('');
+      if (err === 'not-allowed') {
+        setStatusAlert({
+          message: 'Permiso de micrófono no concedido. Permite el acceso o usa el botón "Escribir".',
+          type: 'error',
+        });
+        setTimeout(() => setStatusAlert(null), 6000);
+      }
     },
   });
 

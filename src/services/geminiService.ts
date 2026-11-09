@@ -34,15 +34,22 @@ export async function translateText(
 
     return await res.json();
   } catch (err: any) {
-    console.warn('API Translate fallback:', err);
-    // Return graceful fallback
-    return {
-      translatedText: text,
-      detectedLanguage: fromLang,
-      phonetic: '',
-      nuance: null,
-      alternatives: [],
-    };
+    console.warn('Translate failed, trying one retry:', err);
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      const retryRes = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, fromLang, toLang, tone }),
+      });
+      if (retryRes.ok) {
+        return await retryRes.json();
+      }
+    } catch (retryErr) {
+      console.warn('Retry also failed:', retryErr);
+    }
+
+    throw err;
   }
 }
 
