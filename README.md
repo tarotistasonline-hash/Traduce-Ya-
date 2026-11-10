@@ -1,0 +1,1 @@
+Traduce ya permite entender a la persona con la cual estás dialogando  y que ella también te entienda en cualquier idioma, solo acercándole el móvil, colocándolo sobre la mesa que comparten o a una distancia que permita  escucharse mutuamente 
