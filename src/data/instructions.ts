@@ -19,7 +19,7 @@ export interface InstructionLocale {
 export const INSTRUCTIONS_LOCALES: Record<string, InstructionLocale> = {
   es: {
     modalTitle: 'Guía de Uso e Instrucciones',
-    modalSubtitle: 'Cómo conversar cara a cara en cualquier idioma con Traductor Ya',
+    modalSubtitle: 'Cómo conversar cara a cara en cualquier idioma con Traduce Ya',
     selectLanguageLabel: 'Idioma de la guía',
     translateCustomLabel: 'Traducir guía con IA a otro idioma',
     sections: [

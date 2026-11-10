@@ -24,13 +24,15 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'Traductor Ya - Traductor de Voz y Conversación',
-          short_name: 'Traductor Ya',
+          name: 'Traduce Ya - Traductor de Voz y Conversación',
+          short_name: 'Traduce Ya',
           description:
             'Traductor simultáneo por voz y audio para conversaciones cara a cara y manos libres en cualquier idioma.',
           theme_color: '#090d16',
           background_color: '#090d16',
           display: 'standalone',
+          orientation: 'portrait',
+          categories: ['travel', 'utilities', 'productivity'],
           start_url: '/',
           scope: '/',
           icons: [

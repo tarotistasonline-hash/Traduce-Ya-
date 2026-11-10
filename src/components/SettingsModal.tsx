@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   RefreshCw,
   ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -326,6 +327,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Trash2 className="w-4 h-4" />
               <span>Limpiar historial ({historyCount} turnos)</span>
             </button>
+          </div>
+
+          {/* Privacy and Play Store Compliance */}
+          <div className="pt-3 pb-1 text-center border-t border-slate-800/80">
+            <a
+              href="/privacy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-cyan-400 transition"
+            >
+              <span>Política de Privacidad (Google Play)</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           </div>
         </div>
       </div>

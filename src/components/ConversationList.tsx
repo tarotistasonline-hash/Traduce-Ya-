@@ -9,6 +9,7 @@ import {
   HelpCircle,
   Clock,
   Mic,
+  Trash2,
 } from 'lucide-react';
 import { ConversationTurn, Language } from '../types/translator';
 
@@ -21,6 +22,7 @@ interface ConversationListProps {
   interimText: string;
   onSpeakText: (text: string, langCode: string, cachedAudio?: string, speed?: number) => void;
   onOpenFullScreen: (turn: ConversationTurn) => void;
+  onClearHistory?: () => void;
   fontSize: 'normal' | 'large' | 'huge';
 }
 
@@ -33,6 +35,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   interimText,
   onSpeakText,
   onOpenFullScreen,
+  onClearHistory,
   fontSize,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -63,6 +66,25 @@ export const ConversationList: React.FC<ConversationListProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+      {turns.length > 0 && onClearHistory && (
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 px-1 animate-fade-in">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+            <Clock className="w-3.5 h-3.5 text-cyan-400" />
+            <span>
+              Historial guardado ({turns.length} {turns.length === 1 ? 'mensaje' : 'mensajes'})
+            </span>
+          </div>
+          <button
+            onClick={onClearHistory}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-100 text-xs font-semibold transition shadow-sm"
+            title="Borrar todo el historial"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Limpiar historial</span>
+          </button>
+        </div>
+      )}
+
       {turns.length === 0 && !interimText && !isTranslating && (
         <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 max-w-md mx-auto">
           <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">

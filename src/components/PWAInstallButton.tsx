@@ -84,7 +84,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
               <div className="flex items-center gap-2">
                 <Smartphone className="w-5 h-5 text-cyan-400" />
                 <h3 className="font-bold text-slate-100 text-base">
-                  Instalar Traductor Ya en tu pantalla
+                  Instalar Traduce Ya en tu pantalla
                 </h3>
               </div>
               <button

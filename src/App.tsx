@@ -19,6 +19,8 @@ import {
   Keyboard,
   AlertCircle,
   ExternalLink,
+  History,
+  Trash2,
 } from 'lucide-react';
 
 import {
@@ -429,6 +431,30 @@ export default function App() {
     handleProcessSpeech(phrase, 'user');
   };
 
+  // Clear conversation history
+  const handleClearHistory = useCallback(() => {
+    if (turns.length === 0) {
+      setStatusAlert({
+        message: 'El historial ya está vacío.',
+        type: 'success',
+      });
+      setTimeout(() => setStatusAlert(null), 2500);
+      return;
+    }
+    setTurns([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY_TURNS);
+    } catch {}
+    if ('vibrate' in navigator) {
+      navigator.vibrate?.([40]);
+    }
+    setStatusAlert({
+      message: 'Historial de conversación limpiado con éxito.',
+      type: 'success',
+    });
+    setTimeout(() => setStatusAlert(null), 3000);
+  }, [turns.length]);
+
   const latestTurn = turns.length > 0 ? turns[0] : null;
 
   return (
@@ -441,7 +467,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-cyan-300 via-emerald-300 to-white bg-clip-text text-transparent">
-              Traductor Ya
+              Traduce Ya
             </h1>
             <p className="text-[10px] text-slate-400 hidden sm:block">
               Voz en vivo cara a cara y manos libres
@@ -449,47 +475,77 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+        {/* Right utility buttons and view panels */}
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* Mode Switcher: Cara a Cara and Bidireccional */}
+          <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setViewMode('facetoface')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                viewMode === 'facetoface'
+                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Modo Cara a Cara en Mesa"
+            >
+              <SplitSquareVertical className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Cara a Cara</span>
+              <span className="sm:hidden">Mesa</span>
+            </button>
+            <button
+              onClick={() => setViewMode('chat')}
+              title="Modo Bidireccional"
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                viewMode === 'chat'
+                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>Bidireccional</span>
+            </button>
+          </div>
+
+          {/* Botón Limpiar reemplazando a ? para máxima visibilidad */}
           <button
-            onClick={() => setViewMode('facetoface')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              viewMode === 'facetoface'
-                ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+            onClick={handleClearHistory}
+            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 hover:text-rose-100 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
+            title="Limpiar y vaciar historial de conversación"
           >
-            <SplitSquareVertical className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Cara a Cara</span>
-            <span className="sm:hidden">Mesa</span>
+            <Trash2 className="w-4 h-4 text-rose-400" />
+            <span>Limpiar</span>
           </button>
+
+          {/* Botón Historial visible */}
           <button
             onClick={() => setViewMode('chat')}
-            title="Conversación bidireccional"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
               viewMode === 'chat'
-                ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-300 hover:text-white'
             }`}
+            title="Ver Historial de conversación"
           >
-            <List className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Conversación Bidireccional</span>
-            <span className="sm:hidden">Conversación</span>
-          </button>
-        </div>
-
-        {/* Right utility buttons */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          <button
-            onClick={() => setIsInstructionsOpen(true)}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition"
-            title="Instrucciones y Guía de Uso"
-          >
-            <HelpCircle className="w-4 h-4 text-cyan-400" />
-            <span className="hidden sm:inline">Guía</span>
+            <History className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Historial</span>
+            {turns.length > 0 && (
+              <span className="px-1.5 py-0.5 text-[10px] leading-none rounded-full bg-cyan-500 text-slate-950 font-bold ml-0.5">
+                {turns.length}
+              </span>
+            )}
           </button>
 
           <PWAInstallButton variant="header" />
+
+          {/* Guía en grupo de utilidades */}
+          <button
+            onClick={() => setIsInstructionsOpen(true)}
+            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
+            title="Instrucciones y Guía de Uso"
+          >
+            <HelpCircle className="w-4 h-4 text-cyan-400" />
+            <span className="hidden xl:inline">Guía</span>
+          </button>
 
           <button
             onClick={() => setIsQuickPhrasesOpen(true)}
@@ -677,6 +733,7 @@ export default function App() {
                 })
               }
               onOpenFullScreen={(turn) => setFullScreenTurn(turn)}
+              onClearHistory={handleClearHistory}
               fontSize={settings.fontSize}
             />
 
