@@ -51,6 +51,11 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Google Search Console verification endpoint
+app.get('/googlee814d7c05b3fbac6.html', (req, res) => {
+  res.type('text/html').send('google-site-verification: googlee814d7c05b3fbac6.html');
+});
+
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
