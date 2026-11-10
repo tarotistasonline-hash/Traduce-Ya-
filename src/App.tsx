@@ -21,6 +21,7 @@ import {
   ExternalLink,
   History,
   Trash2,
+  Zap,
 } from 'lucide-react';
 
 import {
@@ -54,6 +55,16 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InstructionsModal } from './components/InstructionsModal';
 import { TextInputModal } from './components/TextInputModal';
+import { PaywallModal } from './components/PaywallModal';
+import {
+  isProUser,
+  getDailyUsage,
+  incrementDailyUsage,
+  getRemainingTranslations,
+  canPerformTranslation,
+  checkUrlAutoUnlock,
+  DAILY_FREE_LIMIT,
+} from './utils/licenseManager';
 
 const STORAGE_KEY_TURNS = 'traductor_ya_turns_v1';
 const STORAGE_KEY_SETTINGS = 'traductor_ya_settings_v1';
@@ -112,6 +123,25 @@ export default function App() {
   const [textInputSpeaker, setTextInputSpeaker] = useState<'user' | 'partner'>('user');
   const [statusAlert, setStatusAlert] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null);
   const [fullScreenTurn, setFullScreenTurn] = useState<ConversationTurn | null>(null);
+
+  // Monetization & usage quota state
+  const [isPro, setIsPro] = useState<boolean>(() => isProUser());
+  const [remainingQuota, setRemainingQuota] = useState<number>(() => getRemainingTranslations());
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false);
+
+  // Check URL query parameters for auto-unlock after payment redirection
+  useEffect(() => {
+    const unlocked = checkUrlAutoUnlock();
+    if (unlocked) {
+      setIsPro(true);
+      setRemainingQuota(Infinity);
+      setStatusAlert({
+        message: '🎉 ¡Pase Ilimitado Activado! Gracias por tu compra. Ya puedes traducir sin límites.',
+        type: 'success',
+      });
+      setTimeout(() => setStatusAlert(null), 8000);
+    }
+  }, []);
 
   // Save history
   useEffect(() => {
@@ -190,6 +220,12 @@ export default function App() {
 
   const handleStartListening = useCallback(
     async (speaker: 'user' | 'partner') => {
+      // Check daily free quota if not pro
+      if (!isPro && !canPerformTranslation()) {
+        setIsPaywallOpen(true);
+        return;
+      }
+
       try {
         stopSpeaking();
         setActiveSpeaker(speaker);
@@ -200,7 +236,7 @@ export default function App() {
         console.warn('handleStartListening caught error safely:', err);
       }
     },
-    [partnerLang.code, startListening, stopSpeaking, userLang.code]
+    [isPro, partnerLang.code, startListening, stopSpeaking, userLang.code]
   );
   handleStartListeningRef.current = handleStartListening;
 
@@ -215,6 +251,14 @@ export default function App() {
     async (text: string, speaker: 'user' | 'partner') => {
       const trimmed = text.trim();
       if (!trimmed) {
+        setActiveSpeaker(null);
+        setInterimText('');
+        return;
+      }
+
+      // Quota check before translating
+      if (!isPro && !canPerformTranslation()) {
+        setIsPaywallOpen(true);
         setActiveSpeaker(null);
         setInterimText('');
         return;
@@ -306,6 +350,12 @@ export default function App() {
 
         setTurns((prev) => [newTurn, ...prev]);
 
+        // Decrement daily free quota if not pro
+        if (!isPro) {
+          incrementDailyUsage();
+          setRemainingQuota(getRemainingTranslations());
+        }
+
         // Auto speak translation
         if (settings.autoSpeak) {
           speak(result.translatedText, finalSpeechCode, {
@@ -333,13 +383,21 @@ export default function App() {
         setIsTranslating(false);
       }
     },
-    [isContinuous, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
+    [isContinuous, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
   );
   handleProcessSpeechRef.current = handleProcessSpeech;
 
   // Audio Multimodal Direct Translation
   const handleProcessAudio = useCallback(
     async (audioBlob: Blob, speaker: 'user' | 'partner') => {
+      // Quota check before translating audio
+      if (!isPro && !canPerformTranslation()) {
+        setIsPaywallOpen(true);
+        setIsTranslating(false);
+        setInterimText('');
+        return;
+      }
+
       setIsTranslating(true);
       setInterimText('Traduciendo audio...');
 
@@ -386,6 +444,12 @@ export default function App() {
 
         setTurns((prev) => [newTurn, ...prev]);
 
+        // Decrement daily free quota if not pro
+        if (!isPro) {
+          incrementDailyUsage();
+          setRemainingQuota(getRemainingTranslations());
+        }
+
         // Auto speak translation immediately!
         if (settings.autoSpeak) {
           speak(result.translatedText, targetSpeechCode, {
@@ -416,7 +480,7 @@ export default function App() {
         setInterimText('');
       }
     },
-    [isContinuous, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceSpeed, speak, userLang]
+    [isContinuous, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceSpeed, speak, userLang]
   );
   handleProcessAudioRef.current = handleProcessAudio;
 
@@ -534,6 +598,35 @@ export default function App() {
               </span>
             )}
           </button>
+
+          {/* Monetización: Pase Ilimitado o Cupo Restante */}
+          {isPro ? (
+            <button
+              onClick={() => {
+                setStatusAlert({
+                  message: '✨ Tu Pase Ilimitado está activo permanentemente.',
+                  type: 'success',
+                });
+                setTimeout(() => setStatusAlert(null), 4000);
+              }}
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition"
+              title="Pase Ilimitado Activado"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">PRO Ilimitado</span>
+              <span className="sm:hidden">PRO</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setIsPaywallOpen(true)}
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 hover:text-amber-100 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
+              title="Ver traducciones restantes o activar Pase Ilimitado"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span className="font-mono">{remainingQuota}</span>
+              <span className="hidden sm:inline">libres</span>
+            </button>
+          )}
 
           <PWAInstallButton variant="header" />
 
@@ -878,6 +971,21 @@ export default function App() {
         onSubmitText={(text, speaker) => {
           handleProcessSpeech(text, speaker);
         }}
+      />
+
+      <PaywallModal
+        isOpen={isPaywallOpen}
+        onClose={() => setIsPaywallOpen(false)}
+        onActivated={() => {
+          setIsPro(true);
+          setRemainingQuota(Infinity);
+          setStatusAlert({
+            message: '🎉 ¡Pase Ilimitado Activado con éxito!',
+            type: 'success',
+          });
+          setTimeout(() => setStatusAlert(null), 6000);
+        }}
+        usedToday={getDailyUsage()}
       />
     </div>
   );
