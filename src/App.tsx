@@ -22,7 +22,10 @@ import {
   History,
   Trash2,
   Zap,
+  Eye,
+  Users,
 } from 'lucide-react';
+import { fetchAndRecordVisit, VisitorStats } from './services/visitorService';
 
 import {
   Language,
@@ -141,6 +144,19 @@ export default function App() {
       });
       setTimeout(() => setStatusAlert(null), 8000);
     }
+  }, []);
+
+  // Visitor stats state (visitas reales)
+  const [visitorStats, setVisitorStats] = useState<VisitorStats>({
+    totalVisits: 1,
+    todayVisits: 1,
+    uniqueVisitors: 1,
+  });
+
+  useEffect(() => {
+    fetchAndRecordVisit().then((stats) => {
+      setVisitorStats(stats);
+    });
   }, []);
 
   // Save history
@@ -525,15 +541,22 @@ export default function App() {
     <div className="flex flex-col h-[100dvh] max-h-[100dvh] h-full w-full max-w-full overflow-hidden bg-slate-950 text-slate-100 font-sans">
       {/* Top Header */}
       <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-3 sm:px-5 py-2.5 flex items-center justify-between z-30 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-400 flex items-center justify-center text-slate-950 shadow-md shadow-cyan-500/20 font-extrabold text-base">
-            TY
+        <div className="flex items-center gap-2.5">
+          {/* Logo TY con iridiscencia, aura animada y brillo holográfico */}
+          <div className="relative group cursor-pointer" title="Traduce Ya">
+            <div className="absolute -inset-1 rounded-2xl iridescent-bg blur-[6px] opacity-75 group-hover:opacity-100 transition duration-700 animate-pulse" />
+            <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl iridescent-bg iridescent-shimmer-container flex items-center justify-center text-slate-950 shadow-lg font-black text-base sm:text-lg tracking-wider border border-white/40 select-none">
+              <span className="relative z-10 font-black text-slate-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]">
+                TY
+              </span>
+            </div>
           </div>
           <div>
-            <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-cyan-300 via-emerald-300 to-white bg-clip-text text-transparent">
-              Traduce Ya
+            <h1 className="font-black text-base sm:text-lg tracking-tight iridescent-text flex items-center gap-1.5 drop-shadow-sm">
+              <span>Traduce Ya</span>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
             </h1>
-            <p className="text-[10px] text-slate-400 hidden sm:block">
+            <p className="text-[10px] text-slate-400 hidden sm:block font-medium">
               Voz en vivo cara a cara y manos libres
             </p>
           </div>
@@ -599,6 +622,17 @@ export default function App() {
             )}
           </button>
 
+          {/* Contador de Visitas Reales */}
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-xs text-slate-300 transition shadow-sm active:scale-95 group"
+            title={`Total visitas reales: ${visitorStats.totalVisits} | Hoy: ${visitorStats.todayVisits} | Visitantes únicos: ${visitorStats.uniqueVisitors} (Toca para ver estadísticas)`}
+          >
+            <Eye className="w-3.5 h-3.5 text-cyan-400 group-hover:text-cyan-300 transition" />
+            <span className="font-mono text-cyan-300 font-bold">{visitorStats.totalVisits.toLocaleString()}</span>
+            <span className="text-[10px] text-slate-400 hidden lg:inline">visitas</span>
+          </button>
+
           {/* Monetización: Pase Ilimitado o Cupo Restante */}
           {isPro ? (
             <button
@@ -609,17 +643,17 @@ export default function App() {
                 });
                 setTimeout(() => setStatusAlert(null), 4000);
               }}
-              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl iridescent-soft-bg border border-amber-400/50 text-amber-200 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 active:scale-95 transition iridescent-shimmer-container"
               title="Pase Ilimitado Activado"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span className="hidden sm:inline">PRO Ilimitado</span>
               <span className="sm:hidden">PRO</span>
             </button>
           ) : (
             <button
               onClick={() => setIsPaywallOpen(true)}
-              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 hover:text-amber-100 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-500/15 hover:iridescent-soft-bg border border-amber-500/40 text-amber-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
               title="Ver traducciones restantes o activar Pase Ilimitado"
             >
               <Zap className="w-3.5 h-3.5 text-amber-400" />
@@ -940,6 +974,7 @@ export default function App() {
         onClearHistory={() => setTurns([])}
         historyCount={turns.length}
         onOpenInstructions={() => setIsInstructionsOpen(true)}
+        visitorStats={visitorStats}
       />
 
       <InstructionsModal

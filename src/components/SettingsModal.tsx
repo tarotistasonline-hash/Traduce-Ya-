@@ -17,6 +17,8 @@ import {
   RefreshCw,
   ShieldCheck,
   ExternalLink,
+  Eye,
+  Users,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -29,6 +31,11 @@ interface SettingsModalProps {
   onClearHistory: () => void;
   historyCount: number;
   onOpenInstructions?: () => void;
+  visitorStats?: {
+    totalVisits: number;
+    todayVisits: number;
+    uniqueVisitors: number;
+  };
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -39,6 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearHistory,
   historyCount,
   onOpenInstructions,
+  visitorStats,
 }) => {
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [testApiResult, setTestApiResult] = useState<{
@@ -102,6 +110,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Settings Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Contador de Visitas Reales */}
+          {visitorStats && (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800 border border-cyan-500/30 shadow-lg space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-cyan-300">
+                <span className="flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  <span>Contador de Visitas Reales</span>
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  En vivo
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <p className="text-lg font-black text-white font-mono">{visitorStats.totalVisits.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">Total Visitas</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <p className="text-lg font-black text-emerald-400 font-mono">{visitorStats.todayVisits.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">Visitas Hoy</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <p className="text-lg font-black text-purple-400 font-mono">{visitorStats.uniqueVisitors.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">Visitantes Únicos</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Gemini API Key Guide & Live Diagnostics */}
           <div className="p-3.5 rounded-xl bg-slate-800/60 border border-cyan-500/30 space-y-3">
             <div className="flex items-center justify-between">
