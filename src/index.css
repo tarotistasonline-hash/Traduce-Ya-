@@ -185,3 +185,41 @@
 .iridescent-aura {
   animation: iridescent-glow 4s ease-in-out infinite;
 }
+
+/* Translating border sparkles & holographic pulse for translation bubble */
+@keyframes iridescent-bubble-glint {
+  0% {
+    box-shadow: 0 0 16px 1px rgba(6, 182, 212, 0.75), inset 0 0 12px rgba(168, 85, 247, 0.35);
+    border-color: #22d3ee;
+  }
+  33% {
+    box-shadow: 0 0 24px 3px rgba(236, 72, 153, 0.8), inset 0 0 16px rgba(236, 72, 153, 0.4);
+    border-color: #f472b6;
+  }
+  66% {
+    box-shadow: 0 0 20px 2px rgba(168, 85, 247, 0.8), inset 0 0 14px rgba(59, 130, 246, 0.4);
+    border-color: #c084fc;
+  }
+  100% {
+    box-shadow: 0 0 16px 1px rgba(6, 182, 212, 0.75), inset 0 0 12px rgba(168, 85, 247, 0.35);
+    border-color: #22d3ee;
+  }
+}
+
+.iridescent-translating-bubble {
+  position: relative;
+  animation: iridescent-bubble-glint 2s ease-in-out infinite;
+  border-width: 2px !important;
+}
+
+/* High Contrast Mode for Outdoor Sunlight */
+.high-contrast-mode {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+.high-contrast-mode .high-contrast-bg {
+  background-color: #000000 !important;
+}
+.high-contrast-mode .high-contrast-text {
+  color: #ffffff !important;
+}

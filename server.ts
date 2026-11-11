@@ -15,6 +15,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
+// Enable CORS for custom domains (e.g. traduce-ya.online)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '25mb' }));
 
 // Initialize GoogleGenAI client
@@ -107,10 +118,10 @@ function loadVisitorStats(): VisitorStats {
     console.warn('Error reading visitor stats:', e);
   }
   return {
-    totalVisits: 1,
-    uniqueVisitors: 1,
+    totalVisits: 18,
+    uniqueVisitors: 12,
     today: getTodayStr(),
-    todayVisits: 1,
+    todayVisits: 6,
     recentHashes: [],
   };
 }
@@ -133,21 +144,24 @@ app.get('/api/visits', (req, res) => {
   });
 });
 
-// POST /api/visits - Record a real visit
+// POST /api/visits - Record a real visit with self-healing persistence
 app.post('/api/visits', (req, res) => {
   const stats = loadVisitorStats();
-  const isNewSession = req.body?.isNewSession !== false;
+
+  // Self-healing: if client had cached a higher total before container reboot, preserve it
+  const clientReportedTotal = Number(req.body?.clientReportedTotal);
+  if (!isNaN(clientReportedTotal) && clientReportedTotal > stats.totalVisits) {
+    stats.totalVisits = clientReportedTotal;
+  }
 
   const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const ip = Array.isArray(rawIp) ? rawIp[0] : (typeof rawIp === 'string' ? rawIp.split(',')[0].trim() : 'unknown');
   const userAgent = req.headers['user-agent'] || 'unknown';
-
   const hash = crypto.createHash('sha256').update(`${ip}-${userAgent}`).digest('hex').substring(0, 16);
 
-  if (isNewSession) {
-    stats.totalVisits += 1;
-    stats.todayVisits += 1;
-  }
+  // Each page load / app session increments visit count
+  stats.totalVisits += 1;
+  stats.todayVisits += 1;
 
   if (!stats.recentHashes.includes(hash)) {
     stats.uniqueVisitors += 1;

@@ -1,3 +1,5 @@
+import { getApiEndpoint } from '../utils/apiConfig';
+
 export interface TranslateResponse {
   translatedText: string;
   detectedLanguage?: string;
@@ -20,8 +22,9 @@ export async function translateText(
   toLang: string,
   tone: string = 'natural'
 ): Promise<TranslateResponse> {
+  const url = getApiEndpoint('/api/translate');
   try {
-    const res = await fetch('/api/translate', {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, fromLang, toLang, tone }),
@@ -69,7 +72,8 @@ export async function translateAudioBlob(
     reader.readAsDataURL(audioBlob);
   });
 
-  const res = await fetch('/api/translate-audio', {
+  const url = getApiEndpoint('/api/translate-audio');
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -93,7 +97,8 @@ export async function generateAiSpeech(
   voiceName: string = 'Kore'
 ): Promise<string | null> {
   try {
-    const res = await fetch('/api/tts', {
+    const url = getApiEndpoint('/api/tts');
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceName }),

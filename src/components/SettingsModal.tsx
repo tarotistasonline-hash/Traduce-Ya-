@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Eye,
   Users,
+  Sun,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -348,6 +349,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Modo de alto contraste para exteriores con luz solar intensa */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 flex items-center justify-between">
+            <div className="space-y-0.5 pr-2">
+              <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                <Sun className="w-4 h-4 text-amber-400" />
+                <span>Modo de alto contraste (Luz solar)</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Texto blanco puro sobre fondo negro absoluto (#000000) para máxima legibilidad bajo el sol.
+              </p>
+            </div>
+            <button
+              onClick={() => onUpdateSettings({ highContrast: !settings.highContrast })}
+              className={`w-12 h-6 flex items-center rounded-full p-1 transition duration-300 shrink-0 ${
+                settings.highContrast ? 'bg-amber-400 justify-end' : 'bg-slate-700 justify-start'
+              }`}
+              title="Activar/desactivar modo alto contraste"
+            >
+              <div className="bg-slate-950 w-4 h-4 rounded-full shadow-md transform transition" />
+            </button>
           </div>
 
           {/* Clear history */}

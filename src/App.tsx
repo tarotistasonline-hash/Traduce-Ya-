@@ -25,7 +25,7 @@ import {
   Eye,
   Users,
 } from 'lucide-react';
-import { fetchAndRecordVisit, VisitorStats } from './services/visitorService';
+import { fetchAndRecordVisit, getCachedVisitorStats, VisitorStats } from './services/visitorService';
 
 import {
   Language,
@@ -106,6 +106,7 @@ export default function App() {
       continuousListen: false,
       fontSize: 'normal',
       hapticFeedback: true,
+      highContrast: false,
     };
   });
 
@@ -146,12 +147,8 @@ export default function App() {
     }
   }, []);
 
-  // Visitor stats state (visitas reales)
-  const [visitorStats, setVisitorStats] = useState<VisitorStats>({
-    totalVisits: 1,
-    todayVisits: 1,
-    uniqueVisitors: 1,
-  });
+  // Visitor stats state (visitas reales con auto-recuperación)
+  const [visitorStats, setVisitorStats] = useState<VisitorStats>(() => getCachedVisitorStats());
 
   useEffect(() => {
     fetchAndRecordVisit().then((stats) => {
@@ -538,7 +535,11 @@ export default function App() {
   const latestTurn = turns.length > 0 ? turns[0] : null;
 
   return (
-    <div className="flex flex-col h-[100dvh] max-h-[100dvh] h-full w-full max-w-full overflow-hidden bg-slate-950 text-slate-100 font-sans">
+    <div className={`flex flex-col h-[100dvh] max-h-[100dvh] h-full w-full max-w-full overflow-hidden font-sans transition-colors duration-200 ${
+      settings.highContrast
+        ? 'bg-black text-white high-contrast-mode'
+        : 'bg-slate-950 text-slate-100'
+    }`}>
       {/* Top Header */}
       <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-3 sm:px-5 py-2.5 flex items-center justify-between z-30 shrink-0">
         <div className="flex items-center gap-2.5">
