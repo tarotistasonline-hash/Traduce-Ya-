@@ -15,17 +15,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Enable CORS for custom domains (e.g. traduce-ya.online)
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
 app.use(express.json({ limit: '25mb' }));
 
 // Initialize GoogleGenAI client
@@ -180,81 +169,6 @@ app.post('/api/visits', (req, res) => {
   });
 });
 
-// ==========================================
-// SUGGESTIONS & FEEDBACK BOX PERSISTENCE & API
-// ==========================================
-const FEEDBACK_FILE = path.join(__dirname, 'feedback_messages.json');
-
-interface FeedbackMessage {
-  id: string;
-  type: 'issue' | 'suggestion' | 'praise';
-  message: string;
-  contact?: string;
-  activeLanguagePair?: { from: string; to: string };
-  deviceInfo?: string;
-  timestamp: number;
-}
-
-function loadFeedback(): FeedbackMessage[] {
-  try {
-    if (fs.existsSync(FEEDBACK_FILE)) {
-      return JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf-8'));
-    }
-  } catch (e) {
-    console.warn('Error reading feedback messages:', e);
-  }
-  return [];
-}
-
-function saveFeedback(items: FeedbackMessage[]): void {
-  try {
-    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('Error saving feedback messages:', e);
-  }
-}
-
-// GET /api/feedback - Retrieve list of feedback messages (newest first)
-app.get('/api/feedback', (req, res) => {
-  const items = loadFeedback();
-  res.json({
-    items,
-    total: items.length,
-  });
-});
-
-// POST /api/feedback - Save a new user feedback / issue report
-app.post('/api/feedback', (req, res) => {
-  const { type = 'suggestion', message, contact, activeLanguagePair, deviceInfo } = req.body;
-  if (!message || typeof message !== 'string' || !message.trim()) {
-    return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
-  }
-
-  const items = loadFeedback();
-  const newItem: FeedbackMessage = {
-    id: `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    type: ['issue', 'suggestion', 'praise'].includes(type) ? type : 'suggestion',
-    message: message.trim(),
-    contact: typeof contact === 'string' ? contact.trim() : undefined,
-    activeLanguagePair,
-    deviceInfo,
-    timestamp: Date.now(),
-  };
-
-  // Prepend so newest is first, cap at 500 items
-  items.unshift(newItem);
-  if (items.length > 500) {
-    items.pop();
-  }
-
-  saveFeedback(items);
-  console.log(`[Feedback Box] New message received (${newItem.type}): "${newItem.message.slice(0, 60)}..."`);
-
-  res.json({
-    success: true,
-    item: newItem,
-  });
-});
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
@@ -281,16 +195,12 @@ Spoken text to translate:
 "${text}"
 
 Translate accurately and naturally as spoken conversation.
-Speech Isolation & Ambient Noise Rejection rules:
-- The input comes from a live microphone in everyday environments (restaurants, cafes, busy streets, background chatter, cutlery clatter, or table vibrations).
-- If the input contains stray phonemes, microphone taps, repeated stutter from recognition, or background noise words that do not belong to the primary speaker's message, filter them out and translate strictly the intended conversational utterance.
-
 Language Detection rules:
 - If Source language request is 'Auto-detect', 'auto', or 'Detectar idioma', analyze the words, vocabulary, and grammar of the input text to identify the spoken language (e.g. "Inglés", "Francés", "Alemán", "Italiano", "Portugués", "Japonés", "Chino", "Ruso", "Árabe", "Coreano", "Español", etc.) and return that language name in Spanish in "detectedLanguage".
 - If the detected source language happens to be the same as the target language, translate into the counterpart language (e.g. if source is Spanish and target was requested as Spanish, translate into English).
 
 Provide:
-1. "translatedText": The direct, natural spoken translation in the target language (focused strictly on the speaker's message, free of noise artifacts).
+1. "translatedText": The direct, natural spoken translation in the target language.
 2. "detectedLanguage": The detected language name in Spanish (e.g. "Inglés", "Francés", "Alemán", "Español", etc.).
 3. "phonetic": Phonetic pronunciation guide (e.g., Pinyin for Mandarin, Romaji for Japanese, or simple phonetic respelling for tricky sounds). If Latin alphabet and intuitive, give the accurate pronunciation or leave empty.
 4. "nuance": If there is a key cultural or colloquial nuance, explain briefly in 1 short sentence in the listener's language. Otherwise null.
@@ -396,19 +306,14 @@ app.post('/api/translate-audio', async (req, res) => {
 Target language: ${toLang || 'Spanish'}
 Source language hint: ${fromLang || 'Auto-detect'}
 
-Speech Isolation & Ambient Noise Rejection:
-- The audio is recorded from a table or handheld mobile device in real environments (restaurants, cafes, traffic, clattering dishes, background chatter).
-- Focus strictly on the primary speaker in the foreground speaking towards the device.
-- Filter out and ignore stray ambient noise, background conversations, music, or microphone friction sounds.
-
 Tasks:
-1. Accurately transcribe what the primary foreground speaker said in their original language.
+1. Accurately transcribe what the speaker said in their original language.
 2. Translate the speech into the target language naturally and colloquially.
 3. Provide phonetic pronunciation guide for the translation.
 
 Respond strictly with a JSON object:
 {
-  "transcribedText": "exact words spoken by the primary speaker",
+  "transcribedText": "exact words spoken in original language",
   "detectedLanguage": "name of language spoken",
   "translatedText": "natural translation in target language",
   "phonetic": "phonetic guide for translated text or empty string"
@@ -527,7 +432,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: false,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
       },
       appType: 'spa',
     });

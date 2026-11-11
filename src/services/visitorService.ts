@@ -1,5 +1,3 @@
-import { getApiEndpoint } from '../utils/apiConfig';
-
 export interface VisitorStats {
   totalVisits: number;
   todayVisits: number;
@@ -42,8 +40,7 @@ export async function fetchAndRecordVisit(): Promise<VisitorStats> {
   }
 
   try {
-    const endpointUrl = getApiEndpoint('/api/visits');
-    const res = await fetch(endpointUrl, {
+    const res = await fetch('/api/visits', {
       method: shouldIncrementSession ? 'POST' : 'GET',
       headers: {
         'Content-Type': 'application/json',

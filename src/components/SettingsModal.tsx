@@ -20,10 +20,6 @@ import {
   Eye,
   Users,
   Sun,
-  Mic,
-  SlidersHorizontal,
-  Inbox,
-  MessageSquarePlus,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -36,8 +32,6 @@ interface SettingsModalProps {
   onClearHistory: () => void;
   historyCount: number;
   onOpenInstructions?: () => void;
-  onOpenFeedback?: () => void;
-  onOpenFeedbackViewer?: () => void;
   visitorStats?: {
     totalVisits: number;
     todayVisits: number;
@@ -53,8 +47,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearHistory,
   historyCount,
   onOpenInstructions,
-  onOpenFeedback,
-  onOpenFeedbackViewer,
   visitorStats,
 }) => {
   const [isTestingApi, setIsTestingApi] = useState(false);
@@ -232,49 +224,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           )}
 
-          {/* Buzón de Sugerencias y Reportes */}
-          {onOpenFeedback && (
-            <button
-              onClick={() => {
-                onClose();
-                onOpenFeedback();
-              }}
-              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-amber-950/30 via-slate-800/80 to-slate-800/60 border border-amber-500/30 hover:border-amber-400 text-left transition group shadow-sm"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0">
-                  <MessageSquarePlus className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-slate-100 group-hover:text-amber-200">
-                    Buzón de Sugerencias y Reportes
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    Avísanos si algo no funcionó o sugiere mejoras
-                  </div>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-300 group-hover:translate-x-0.5 transition" />
-            </button>
-          )}
-
-          {/* Ver Mensajes Recibidos en el Buzón (Panel Dueño) */}
-          {onOpenFeedbackViewer && (
-            <button
-              onClick={() => {
-                onClose();
-                onOpenFeedbackViewer();
-              }}
-              className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-800/40 hover:bg-slate-800/80 border border-slate-700/60 hover:border-cyan-500/30 text-left transition group text-xs text-slate-300"
-            >
-              <div className="flex items-center gap-2.5">
-                <Inbox className="w-4 h-4 text-cyan-400" />
-                <span>Ver mensajes recibidos en el buzón (Administrador)</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-300 transition" />
-            </button>
-          )}
-
           {/* PWA Install Option */}
           <PWAInstallButton variant="settings" />
 
@@ -400,41 +349,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Filtro activo de ruido exterior y aislamiento de voz */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5 pr-2">
-                <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                  <Mic className="w-4 h-4 text-cyan-400" />
-                  <span>Filtro de ruido exterior y aislamiento de voz</span>
-                  {settings.noiseFilter !== false && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">
-                      Activo
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Aísla las voces de la mesa y cancela el murmullo de restaurantes, platos, tráfico y eco ambiente mediante filtros DSP y supresión de ruido.
-                </p>
-              </div>
-              <button
-                onClick={() => onUpdateSettings({ noiseFilter: settings.noiseFilter === false ? true : false })}
-                className={`w-12 h-6 flex items-center rounded-full p-1 transition duration-300 shrink-0 ${
-                  settings.noiseFilter !== false ? 'bg-cyan-500 justify-end' : 'bg-slate-700 justify-start'
-                }`}
-                title="Activar/desactivar filtro de ruido y aislamiento de voz"
-              >
-                <div className="bg-white w-4 h-4 rounded-full shadow-md transform transition" />
-              </button>
-            </div>
-            {settings.noiseFilter !== false && (
-              <div className="pt-2 border-t border-slate-800 flex items-center gap-2 text-[11px] text-cyan-300/90 font-medium">
-                <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>Supresión acústica WebRTC + Filtro pasa-banda vocal (85Hz - 7.5kHz) activados.</span>
-              </div>
-            )}
           </div>
 
           {/* Modo de alto contraste para exteriores con luz solar intensa */}

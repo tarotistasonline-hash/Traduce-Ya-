@@ -24,8 +24,6 @@ import {
   Zap,
   Eye,
   Users,
-  MessageSquarePlus,
-  Inbox,
 } from 'lucide-react';
 import { fetchAndRecordVisit, getCachedVisitorStats, VisitorStats } from './services/visitorService';
 
@@ -61,8 +59,6 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { InstructionsModal } from './components/InstructionsModal';
 import { TextInputModal } from './components/TextInputModal';
 import { PaywallModal } from './components/PaywallModal';
-import { FeedbackModal } from './components/FeedbackModal';
-import { FeedbackViewerModal } from './components/FeedbackViewerModal';
 import {
   isProUser,
   getDailyUsage,
@@ -111,7 +107,6 @@ export default function App() {
       fontSize: 'normal',
       hapticFeedback: true,
       highContrast: false,
-      noiseFilter: true,
     };
   });
 
@@ -130,8 +125,6 @@ export default function App() {
   const [isInstructionsOpen, setIsInstructionsOpen] = useState(false);
   const [isTextInputOpen, setIsTextInputOpen] = useState(false);
   const [textInputSpeaker, setTextInputSpeaker] = useState<'user' | 'partner'>('user');
-  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
-  const [isFeedbackViewerOpen, setIsFeedbackViewerOpen] = useState(false);
   const [statusAlert, setStatusAlert] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null);
   const [fullScreenTurn, setFullScreenTurn] = useState<ConversationTurn | null>(null);
 
@@ -207,7 +200,6 @@ export default function App() {
     stopListening,
   } = useSpeechRecognition({
     lang: currentListeningLang,
-    noiseFilter: settings.noiseFilter !== false,
     onResult: (text) => {
       setInterimText(text);
     },
@@ -398,13 +390,8 @@ export default function App() {
             handleStartListeningRef.current(nextSpeaker);
           }, 3000);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.warn('Translation workflow notice:', err);
-        setStatusAlert({
-          message: 'No se pudo completar la traducción en este momento.',
-          type: 'error',
-        });
-        setTimeout(() => setStatusAlert(null), 6000);
       } finally {
         setIsTranslating(false);
       }
@@ -697,16 +684,6 @@ export default function App() {
             <span className="hidden md:inline">Frases</span>
           </button>
 
-          {/* Buzón de Sugerencias y Reportes */}
-          <button
-            onClick={() => setIsFeedbackOpen(true)}
-            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition active:scale-95 group"
-            title="Buzón de sugerencias y reportes"
-          >
-            <MessageSquarePlus className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
-            <span className="hidden lg:inline">Buzón</span>
-          </button>
-
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white transition"
@@ -743,17 +720,6 @@ export default function App() {
           <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{statusAlert.message}</span>
-            {statusAlert.type === 'error' && (
-              <button
-                onClick={() => {
-                  setStatusAlert(null);
-                  setIsFeedbackOpen(true);
-                }}
-                className="text-[10px] underline font-semibold text-rose-300 hover:text-white shrink-0 ml-1.5"
-              >
-                Avisar en Buzón
-              </button>
-            )}
           </div>
           <button
             onClick={() => setStatusAlert(null)}
@@ -1009,20 +975,7 @@ export default function App() {
         onClearHistory={() => setTurns([])}
         historyCount={turns.length}
         onOpenInstructions={() => setIsInstructionsOpen(true)}
-        onOpenFeedback={() => setIsFeedbackOpen(true)}
-        onOpenFeedbackViewer={() => setIsFeedbackViewerOpen(true)}
         visitorStats={visitorStats}
-      />
-
-      <FeedbackModal
-        isOpen={isFeedbackOpen}
-        onClose={() => setIsFeedbackOpen(false)}
-        activeLanguagePair={{ from: userLang.name, to: partnerLang.name }}
-      />
-
-      <FeedbackViewerModal
-        isOpen={isFeedbackViewerOpen}
-        onClose={() => setIsFeedbackViewerOpen(false)}
       />
 
       <InstructionsModal
