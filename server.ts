@@ -2,8 +2,6 @@ import express from 'express';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
-import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
@@ -72,101 +70,6 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
       }
     }
   ], null, 2));
-});
-
-// ==========================================
-// REAL VISITOR COUNTER PERSISTENCE & API
-// ==========================================
-const VISITS_FILE = path.join(__dirname, 'visitor_stats.json');
-
-interface VisitorStats {
-  totalVisits: number;
-  uniqueVisitors: number;
-  today: string;
-  todayVisits: number;
-  recentHashes: string[];
-}
-
-function getTodayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function loadVisitorStats(): VisitorStats {
-  try {
-    if (fs.existsSync(VISITS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(VISITS_FILE, 'utf-8'));
-      const today = getTodayStr();
-      if (data.today !== today) {
-        data.today = today;
-        data.todayVisits = 0;
-      }
-      return data;
-    }
-  } catch (e) {
-    console.warn('Error reading visitor stats:', e);
-  }
-  return {
-    totalVisits: 18,
-    uniqueVisitors: 12,
-    today: getTodayStr(),
-    todayVisits: 6,
-    recentHashes: [],
-  };
-}
-
-function saveVisitorStats(stats: VisitorStats): void {
-  try {
-    fs.writeFileSync(VISITS_FILE, JSON.stringify(stats, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('Error writing visitor stats:', e);
-  }
-}
-
-// GET /api/visits - Get current stats
-app.get('/api/visits', (req, res) => {
-  const stats = loadVisitorStats();
-  res.json({
-    totalVisits: stats.totalVisits,
-    todayVisits: stats.todayVisits,
-    uniqueVisitors: stats.uniqueVisitors,
-  });
-});
-
-// POST /api/visits - Record a real visit with self-healing persistence
-app.post('/api/visits', (req, res) => {
-  const stats = loadVisitorStats();
-
-  // Self-healing: if client had cached a higher total before container reboot, preserve it
-  const clientReportedTotal = Number(req.body?.clientReportedTotal);
-  if (!isNaN(clientReportedTotal) && clientReportedTotal > stats.totalVisits) {
-    stats.totalVisits = clientReportedTotal;
-  }
-
-  const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-  const ip = Array.isArray(rawIp) ? rawIp[0] : (typeof rawIp === 'string' ? rawIp.split(',')[0].trim() : 'unknown');
-  const userAgent = req.headers['user-agent'] || 'unknown';
-  const hash = crypto.createHash('sha256').update(`${ip}-${userAgent}`).digest('hex').substring(0, 16);
-
-  // Each page load / app session increments visit count
-  stats.totalVisits += 1;
-  stats.todayVisits += 1;
-
-  if (!stats.recentHashes.includes(hash)) {
-    stats.uniqueVisitors += 1;
-    stats.recentHashes.push(hash);
-    if (stats.recentHashes.length > 5000) {
-      stats.recentHashes = stats.recentHashes.slice(-5000);
-    }
-  }
-
-  saveVisitorStats(stats);
-
-  res.json({
-    totalVisits: stats.totalVisits,
-    todayVisits: stats.todayVisits,
-    uniqueVisitors: stats.uniqueVisitors,
-  });
 });
 
 

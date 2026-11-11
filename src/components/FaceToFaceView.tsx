@@ -159,15 +159,12 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               </p>
             </div>
           ) : isTranslating && latestTurn?.speaker === 'user' ? (
-            <div className="space-y-2 py-3 px-6 rounded-2xl bg-slate-900/90 border iridescent-translating-bubble animate-fade-in">
-              <div className="flex items-center justify-center gap-2 iridescent-text font-bold text-sm sm:text-base">
-                <Sparkles className="w-4 h-4 animate-spin text-cyan-400" />
+            <div className="space-y-1.5 animate-pulse py-2">
+              <div className="flex items-center justify-center gap-2 text-cyan-400 text-xs sm:text-sm">
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
                 <span>Traduciendo al {partnerLang.name}...</span>
               </div>
-              <div className="flex items-center justify-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                <span className="text-[11px] text-slate-300 font-mono">IA interpretando en tiempo real...</span>
-              </div>
+              <div className="h-4 w-40 bg-slate-800/80 rounded-md mx-auto" />
             </div>
           ) : partnerMessage ? (
             <div className="space-y-1.5 max-w-md w-full animate-fade-in py-1">
@@ -340,15 +337,12 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               </p>
             </div>
           ) : isTranslating && latestTurn?.speaker === 'partner' ? (
-            <div className="space-y-2 py-3 px-6 rounded-2xl bg-slate-900/90 border iridescent-translating-bubble animate-fade-in">
-              <div className="flex items-center justify-center gap-2 iridescent-text font-bold text-sm sm:text-base">
-                <Sparkles className="w-4 h-4 animate-spin text-emerald-400" />
+            <div className="space-y-1.5 animate-pulse py-2">
+              <div className="flex items-center justify-center gap-2 text-emerald-400 text-xs sm:text-sm">
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
                 <span>Traduciendo al {userLang.name}...</span>
               </div>
-              <div className="flex items-center justify-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span className="text-[11px] text-slate-300 font-mono">IA interpretando en tiempo real...</span>
-              </div>
+              <div className="h-4 w-40 bg-slate-800/80 rounded-md mx-auto" />
             </div>
           ) : userMessage ? (
             <div className="space-y-1.5 max-w-md w-full animate-fade-in py-1">

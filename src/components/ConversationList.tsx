@@ -115,9 +115,8 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         </div>
       )}
 
-      {turns.map((turn, index) => {
+      {turns.map((turn) => {
         const isUser = turn.speaker === 'user';
-        const isLatest = index === 0;
         const speakerLang = isUser ? userLang : partnerLang;
         const targetLang = isUser ? partnerLang : userLang;
 
@@ -149,24 +148,14 @@ export const ConversationList: React.FC<ConversationListProps> = ({
               </span>
             </div>
 
-            {/* Bubble with Iridescent translating glint when processing */}
+            {/* Bubble */}
             <div
               className={`max-w-[92%] sm:max-w-[80%] rounded-2xl p-4 transition-all shadow-md ${
-                isLatest && isTranslating ? 'iridescent-translating-bubble' : ''
-              } ${
                 isUser
                   ? 'bg-emerald-950/40 border border-emerald-500/30 rounded-tr-sm text-slate-100'
                   : 'bg-slate-900 border border-cyan-500/30 rounded-tl-sm text-slate-100'
               }`}
             >
-              {/* Iridescent Translating Indicator */}
-              {isLatest && isTranslating && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold iridescent-text mb-2 pb-1.5 border-b border-cyan-500/30 animate-pulse">
-                  <Sparkles className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                  <span>Procesando traducción con IA...</span>
-                </div>
-              )}
-
               {/* Original Spoken Text */}
               <div className="text-xs text-slate-400 font-medium mb-1 flex items-center justify-between">
                 <span>
