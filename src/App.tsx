@@ -107,6 +107,7 @@ export default function App() {
       fontSize: 'normal',
       hapticFeedback: true,
       highContrast: false,
+      noiseFilter: true,
     };
   });
 
@@ -200,6 +201,7 @@ export default function App() {
     stopListening,
   } = useSpeechRecognition({
     lang: currentListeningLang,
+    noiseFilter: settings.noiseFilter !== false,
     onResult: (text) => {
       setInterimText(text);
     },

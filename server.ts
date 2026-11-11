@@ -206,12 +206,16 @@ Spoken text to translate:
 "${text}"
 
 Translate accurately and naturally as spoken conversation.
+Speech Isolation & Ambient Noise Rejection rules:
+- The input comes from a live microphone in everyday environments (restaurants, cafes, busy streets, background chatter, cutlery clatter, or table vibrations).
+- If the input contains stray phonemes, microphone taps, repeated stutter from recognition, or background noise words that do not belong to the primary speaker's message, filter them out and translate strictly the intended conversational utterance.
+
 Language Detection rules:
 - If Source language request is 'Auto-detect', 'auto', or 'Detectar idioma', analyze the words, vocabulary, and grammar of the input text to identify the spoken language (e.g. "Inglés", "Francés", "Alemán", "Italiano", "Portugués", "Japonés", "Chino", "Ruso", "Árabe", "Coreano", "Español", etc.) and return that language name in Spanish in "detectedLanguage".
 - If the detected source language happens to be the same as the target language, translate into the counterpart language (e.g. if source is Spanish and target was requested as Spanish, translate into English).
 
 Provide:
-1. "translatedText": The direct, natural spoken translation in the target language.
+1. "translatedText": The direct, natural spoken translation in the target language (focused strictly on the speaker's message, free of noise artifacts).
 2. "detectedLanguage": The detected language name in Spanish (e.g. "Inglés", "Francés", "Alemán", "Español", etc.).
 3. "phonetic": Phonetic pronunciation guide (e.g., Pinyin for Mandarin, Romaji for Japanese, or simple phonetic respelling for tricky sounds). If Latin alphabet and intuitive, give the accurate pronunciation or leave empty.
 4. "nuance": If there is a key cultural or colloquial nuance, explain briefly in 1 short sentence in the listener's language. Otherwise null.
@@ -317,14 +321,19 @@ app.post('/api/translate-audio', async (req, res) => {
 Target language: ${toLang || 'Spanish'}
 Source language hint: ${fromLang || 'Auto-detect'}
 
+Speech Isolation & Ambient Noise Rejection:
+- The audio is recorded from a table or handheld mobile device in real environments (restaurants, cafes, traffic, clattering dishes, background chatter).
+- Focus strictly on the primary speaker in the foreground speaking towards the device.
+- Filter out and ignore stray ambient noise, background conversations, music, or microphone friction sounds.
+
 Tasks:
-1. Accurately transcribe what the speaker said in their original language.
+1. Accurately transcribe what the primary foreground speaker said in their original language.
 2. Translate the speech into the target language naturally and colloquially.
 3. Provide phonetic pronunciation guide for the translation.
 
 Respond strictly with a JSON object:
 {
-  "transcribedText": "exact words spoken in original language",
+  "transcribedText": "exact words spoken by the primary speaker",
   "detectedLanguage": "name of language spoken",
   "translatedText": "natural translation in target language",
   "phonetic": "phonetic guide for translated text or empty string"

@@ -33,4 +33,5 @@ export interface TranslatorSettings {
   fontSize: 'normal' | 'large' | 'huge';
   hapticFeedback: boolean;
   highContrast?: boolean; // Modo de alto contraste para exteriores/luz solar intensa
+  noiseFilter?: boolean;  // Filtro activo de ruido exterior y aislamiento de voz
 }

@@ -20,6 +20,8 @@ import {
   Eye,
   Users,
   Sun,
+  Mic,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -349,6 +351,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Filtro activo de ruido exterior y aislamiento de voz */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5 pr-2">
+                <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Mic className="w-4 h-4 text-cyan-400" />
+                  <span>Filtro de ruido exterior y aislamiento de voz</span>
+                  {settings.noiseFilter !== false && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">
+                      Activo
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Aísla las voces de la mesa y cancela el murmullo de restaurantes, platos, tráfico y eco ambiente mediante filtros DSP y supresión de ruido.
+                </p>
+              </div>
+              <button
+                onClick={() => onUpdateSettings({ noiseFilter: settings.noiseFilter === false ? true : false })}
+                className={`w-12 h-6 flex items-center rounded-full p-1 transition duration-300 shrink-0 ${
+                  settings.noiseFilter !== false ? 'bg-cyan-500 justify-end' : 'bg-slate-700 justify-start'
+                }`}
+                title="Activar/desactivar filtro de ruido y aislamiento de voz"
+              >
+                <div className="bg-white w-4 h-4 rounded-full shadow-md transform transition" />
+              </button>
+            </div>
+            {settings.noiseFilter !== false && (
+              <div className="pt-2 border-t border-slate-800 flex items-center gap-2 text-[11px] text-cyan-300/90 font-medium">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Supresión acústica WebRTC + Filtro pasa-banda vocal (85Hz - 7.5kHz) activados.</span>
+              </div>
+            )}
           </div>
 
           {/* Modo de alto contraste para exteriores con luz solar intensa */}

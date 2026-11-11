@@ -17,6 +17,7 @@ interface UseSpeechRecognitionOptions {
   onEnd?: () => void;
   onError?: (error: string) => void;
   silenceTimeoutMs?: number;
+  noiseFilter?: boolean;
 }
 
 export function useSpeechRecognition({
@@ -27,6 +28,7 @@ export function useSpeechRecognition({
   onEnd,
   onError,
   silenceTimeoutMs = 950,
+  noiseFilter = true,
 }: UseSpeechRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
@@ -165,17 +167,35 @@ export function useSpeechRecognition({
         throw new Error('El micrófono no está disponible en este navegador o visor.');
       }
 
-      // 1. Acquire microphone stream (User gesture active)
+      // 1. Acquire microphone stream with advanced acoustic noise suppression
+      const audioConstraints: MediaTrackConstraints = noiseFilter
+        ? {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            // Advanced acoustic noise suppression hints for Chromium / WebKit
+            ...({
+              googEchoCancellation: true,
+              googAutoGainControl: true,
+              googNoiseSuppression: true,
+              googHighpassFilter: true,
+              googTypingNoiseDetection: true,
+            } as any),
+          }
+        : {
+            echoCancellation: false,
+            noiseSuppression: false,
+          };
+
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: audioConstraints,
       });
       mediaStreamRef.current = stream;
 
-      // 2. Setup Audio Visualizer & VAD
+      let recordStream: MediaStream = stream;
+
+      // 2. Setup Audio Visualizer & DSP Voice Isolation Chain
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) {
@@ -191,7 +211,42 @@ export function useSpeechRecognition({
           analyserRef.current = analyser;
 
           const source = audioCtx.createMediaStreamSource(stream);
-          source.connect(analyser);
+
+          if (noiseFilter) {
+            // High-pass filter (85Hz): eliminates low-frequency table thumps, engine rumble, AC vibrations
+            const hpFilter = audioCtx.createBiquadFilter();
+            hpFilter.type = 'highpass';
+            hpFilter.frequency.value = 85;
+            hpFilter.Q.value = 0.7;
+
+            // Low-pass filter (7500Hz): cuts off high-frequency cutlery clatter, glass clinks, hiss
+            const lpFilter = audioCtx.createBiquadFilter();
+            lpFilter.type = 'lowpass';
+            lpFilter.frequency.value = 7500;
+            lpFilter.Q.value = 0.7;
+
+            // Voice presence peaking filter (2500Hz): clarifies human vocal tract frequencies
+            const voiceFilter = audioCtx.createBiquadFilter();
+            voiceFilter.type = 'peaking';
+            voiceFilter.frequency.value = 2500;
+            voiceFilter.gain.value = 3.5;
+            voiceFilter.Q.value = 1.0;
+
+            // Chain: source -> HP -> Voice Peaking -> LP -> Analyser
+            source.connect(hpFilter);
+            hpFilter.connect(voiceFilter);
+            voiceFilter.connect(lpFilter);
+            lpFilter.connect(analyser);
+
+            // Connect isolated audio into MediaStreamDestination for clean MediaRecorder capture
+            const dest = audioCtx.createMediaStreamDestination();
+            lpFilter.connect(dest);
+            if (dest.stream && dest.stream.getAudioTracks().length > 0) {
+              recordStream = dest.stream;
+            }
+          } else {
+            source.connect(analyser);
+          }
 
           const bufferLength = analyser.frequencyBinCount;
           const dataArray = new Uint8Array(bufferLength);
@@ -208,14 +263,18 @@ export function useSpeechRecognition({
             const level = Math.min(100, Math.round((average / 128) * 100 * 1.5));
             setAudioLevel(level);
 
-            // Audio-based VAD fallback
-            if (level > 18) {
+            // Noise-gated voice activity detection:
+            // In noisy rooms, low background murmur (<14) is ignored.
+            const speechThreshold = noiseFilter ? 14 : 10;
+            const silenceFloor = noiseFilter ? 10 : 8;
+
+            if (level > speechThreshold) {
               hasSpokenAudioRef.current = true;
               if (vadSilenceTimerRef.current) {
                 clearTimeout(vadSilenceTimerRef.current);
                 vadSilenceTimerRef.current = null;
               }
-            } else if (hasSpokenAudioRef.current && level < 10) {
+            } else if (hasSpokenAudioRef.current && level < silenceFloor) {
               if (!vadSilenceTimerRef.current && !hasSpeechApiResultsRef.current) {
                 vadSilenceTimerRef.current = setTimeout(() => {
                   if (!hasDispatchedRef.current) {
@@ -235,7 +294,7 @@ export function useSpeechRecognition({
         console.warn('Audio level analyser init:', e);
       }
 
-      // 3. Setup MediaRecorder for direct multimodal audio fallback
+      // 3. Setup MediaRecorder for direct multimodal audio fallback using isolated voice stream
       try {
         let mimeType = 'audio/webm';
         if (typeof MediaRecorder !== 'undefined') {
@@ -249,7 +308,7 @@ export function useSpeechRecognition({
             mimeType = 'audio/ogg';
           }
 
-          const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+          const recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : undefined);
           recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) {
               audioChunksRef.current.push(e.data);
