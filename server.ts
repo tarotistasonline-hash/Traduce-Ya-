@@ -51,27 +51,6 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Google Search Console verification endpoint
-app.get('/googlee814d7c05b3fbac6.html', (req, res) => {
-  res.type('text/html').send('google-site-verification: googlee814d7c05b3fbac6.html');
-});
-
-// Digital Asset Links endpoint for Google Play verification
-app.get('/.well-known/assetlinks.json', (req, res) => {
-  res.type('application/json').send(JSON.stringify([
-    {
-      relation: ["delegate_permission/common.handle_all_urls"],
-      target: {
-        namespace: "android_app",
-        package_name: "app.run.europe_west1.traductor_ya_traductor_de_voz_y_conversaci_n_633978869738.twa",
-        sha256_cert_fingerprints: [
-          "1A:85:DA:BC:7C:3B:BA:0B:DF:16:97:3A:92:F0:E6:13:27:6B:0F:E9:D3:FB:DB:78:C3:0B:45:EF:6F:2B:20:3C"
-        ]
-      }
-    }
-  ], null, 2));
-});
-
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
