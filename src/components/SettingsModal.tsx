@@ -22,6 +22,8 @@ import {
   Sun,
   Mic,
   SlidersHorizontal,
+  Inbox,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -34,6 +36,8 @@ interface SettingsModalProps {
   onClearHistory: () => void;
   historyCount: number;
   onOpenInstructions?: () => void;
+  onOpenFeedback?: () => void;
+  onOpenFeedbackViewer?: () => void;
   visitorStats?: {
     totalVisits: number;
     todayVisits: number;
@@ -49,6 +53,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearHistory,
   historyCount,
   onOpenInstructions,
+  onOpenFeedback,
+  onOpenFeedbackViewer,
   visitorStats,
 }) => {
   const [isTestingApi, setIsTestingApi] = useState(false);
@@ -223,6 +229,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-300 group-hover:translate-x-0.5 transition" />
+            </button>
+          )}
+
+          {/* Buzón de Sugerencias y Reportes */}
+          {onOpenFeedback && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenFeedback();
+              }}
+              className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-amber-950/30 via-slate-800/80 to-slate-800/60 border border-amber-500/30 hover:border-amber-400 text-left transition group shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0">
+                  <MessageSquarePlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-100 group-hover:text-amber-200">
+                    Buzón de Sugerencias y Reportes
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Avísanos si algo no funcionó o sugiere mejoras
+                  </div>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-300 group-hover:translate-x-0.5 transition" />
+            </button>
+          )}
+
+          {/* Ver Mensajes Recibidos en el Buzón (Panel Dueño) */}
+          {onOpenFeedbackViewer && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenFeedbackViewer();
+              }}
+              className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-800/40 hover:bg-slate-800/80 border border-slate-700/60 hover:border-cyan-500/30 text-left transition group text-xs text-slate-300"
+            >
+              <div className="flex items-center gap-2.5">
+                <Inbox className="w-4 h-4 text-cyan-400" />
+                <span>Ver mensajes recibidos en el buzón (Administrador)</span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-300 transition" />
             </button>
           )}
 

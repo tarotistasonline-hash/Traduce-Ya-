@@ -180,6 +180,81 @@ app.post('/api/visits', (req, res) => {
   });
 });
 
+// ==========================================
+// SUGGESTIONS & FEEDBACK BOX PERSISTENCE & API
+// ==========================================
+const FEEDBACK_FILE = path.join(__dirname, 'feedback_messages.json');
+
+interface FeedbackMessage {
+  id: string;
+  type: 'issue' | 'suggestion' | 'praise';
+  message: string;
+  contact?: string;
+  activeLanguagePair?: { from: string; to: string };
+  deviceInfo?: string;
+  timestamp: number;
+}
+
+function loadFeedback(): FeedbackMessage[] {
+  try {
+    if (fs.existsSync(FEEDBACK_FILE)) {
+      return JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('Error reading feedback messages:', e);
+  }
+  return [];
+}
+
+function saveFeedback(items: FeedbackMessage[]): void {
+  try {
+    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error saving feedback messages:', e);
+  }
+}
+
+// GET /api/feedback - Retrieve list of feedback messages (newest first)
+app.get('/api/feedback', (req, res) => {
+  const items = loadFeedback();
+  res.json({
+    items,
+    total: items.length,
+  });
+});
+
+// POST /api/feedback - Save a new user feedback / issue report
+app.post('/api/feedback', (req, res) => {
+  const { type = 'suggestion', message, contact, activeLanguagePair, deviceInfo } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
+  }
+
+  const items = loadFeedback();
+  const newItem: FeedbackMessage = {
+    id: `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    type: ['issue', 'suggestion', 'praise'].includes(type) ? type : 'suggestion',
+    message: message.trim(),
+    contact: typeof contact === 'string' ? contact.trim() : undefined,
+    activeLanguagePair,
+    deviceInfo,
+    timestamp: Date.now(),
+  };
+
+  // Prepend so newest is first, cap at 500 items
+  items.unshift(newItem);
+  if (items.length > 500) {
+    items.pop();
+  }
+
+  saveFeedback(items);
+  console.log(`[Feedback Box] New message received (${newItem.type}): "${newItem.message.slice(0, 60)}..."`);
+
+  res.json({
+    success: true,
+    item: newItem,
+  });
+});
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
