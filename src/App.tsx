@@ -26,6 +26,7 @@ import {
   Users,
   MessageSquarePlus,
   Inbox,
+  Activity,
 } from 'lucide-react';
 import { fetchAndRecordVisit, getCachedVisitorStats, VisitorStats } from './services/visitorService';
 
@@ -63,6 +64,7 @@ import { TextInputModal } from './components/TextInputModal';
 import { PaywallModal } from './components/PaywallModal';
 import { FeedbackModal } from './components/FeedbackModal';
 import { FeedbackViewerModal } from './components/FeedbackViewerModal';
+import { AudioDiagnosticModal } from './components/AudioDiagnosticModal';
 import {
   isProUser,
   isCreatorUser,
@@ -119,6 +121,7 @@ export default function App() {
 
   // Active speaker currently recording
   const [activeSpeaker, setActiveSpeaker] = useState<'user' | 'partner' | null>(null);
+  const [translatingSpeaker, setTranslatingSpeaker] = useState<'user' | 'partner' | null>(null);
   const [interimText, setInterimText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [isContinuous, setIsContinuous] = useState(false);
@@ -134,6 +137,7 @@ export default function App() {
   const [textInputSpeaker, setTextInputSpeaker] = useState<'user' | 'partner'>('user');
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [isFeedbackViewerOpen, setIsFeedbackViewerOpen] = useState(false);
+  const [isAudioDiagnosticOpen, setIsAudioDiagnosticOpen] = useState(false);
   const [statusAlert, setStatusAlert] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null);
   const [fullScreenTurn, setFullScreenTurn] = useState<ConversationTurn | null>(null);
 
@@ -195,6 +199,7 @@ export default function App() {
 
   const activeSpeakerRef = useRef<'user' | 'partner' | null>(null);
   activeSpeakerRef.current = activeSpeaker;
+  const lastActiveSpeakerRef = useRef<'user' | 'partner'>('user');
 
   const handleProcessSpeechRef = useRef<(text: string, speaker: 'user' | 'partner') => void>(() => {});
   const handleProcessAudioRef = useRef<(blob: Blob, speaker: 'user' | 'partner') => void>(() => {});
@@ -214,13 +219,13 @@ export default function App() {
       setInterimText(text);
     },
     onFinalText: (text) => {
-      const speaker = activeSpeakerRef.current;
+      const speaker = activeSpeakerRef.current || lastActiveSpeakerRef.current;
       if (speaker && text.trim()) {
         handleProcessSpeechRef.current(text.trim(), speaker);
       }
     },
     onAudioRecorded: (blob) => {
-      const speaker = activeSpeakerRef.current || 'user';
+      const speaker = activeSpeakerRef.current || lastActiveSpeakerRef.current || 'user';
       handleProcessAudioRef.current(blob, speaker);
     },
     onEnd: () => {
@@ -253,6 +258,7 @@ export default function App() {
         stopSpeaking();
         setActiveSpeaker(speaker);
         activeSpeakerRef.current = speaker;
+        lastActiveSpeakerRef.current = speaker;
         const targetLang = speaker === 'user' ? userLang.code : partnerLang.code;
         await startListening(targetLang);
       } catch (err) {
@@ -288,6 +294,7 @@ export default function App() {
       }
 
       setIsTranslating(true);
+      setTranslatingSpeaker(speaker);
       setInterimText('');
 
       const sourceLanguage = speaker === 'user' ? userLang : partnerLang;
@@ -403,12 +410,13 @@ export default function App() {
       } catch (err: any) {
         console.warn('Translation workflow notice:', err);
         setStatusAlert({
-          message: 'No se pudo completar la traducción en este momento.',
+          message: err?.message || 'No se pudo completar la traducción en este momento.',
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 6000);
+        setTimeout(() => setStatusAlert(null), 7000);
       } finally {
         setIsTranslating(false);
+        setTranslatingSpeaker(null);
       }
     },
     [isContinuous, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
@@ -422,11 +430,13 @@ export default function App() {
       if (!isPro && !canPerformTranslation()) {
         setIsPaywallOpen(true);
         setIsTranslating(false);
+        setTranslatingSpeaker(null);
         setInterimText('');
         return;
       }
 
       setIsTranslating(true);
+      setTranslatingSpeaker(speaker);
       setInterimText('Traduciendo audio...');
 
       const sourceLanguage = speaker === 'user' ? userLang : partnerLang;
@@ -443,6 +453,15 @@ export default function App() {
 
       try {
         const result = await translateAudioBlob(audioBlob, fromLangParam, toLangParam);
+
+        if (result.noSpeech || !result.translatedText) {
+          setStatusAlert({
+            message: 'No se detectó voz con claridad. Habla más cerca del micrófono o usa "Diagnóstico Mic".',
+            type: 'error',
+          });
+          setTimeout(() => setStatusAlert(null), 6000);
+          return;
+        }
 
         if (result.detectedLanguage) {
           if (speaker === 'partner') {
@@ -499,12 +518,13 @@ export default function App() {
       } catch (err: any) {
         console.warn('Audio translation notice:', err);
         setStatusAlert({
-          message: 'Audio no detectado con claridad. Por favor habla de nuevo cerca del micrófono.',
-          type: 'info',
+          message: err?.message || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.',
+          type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 4000);
+        setTimeout(() => setStatusAlert(null), 7000);
       } finally {
         setIsTranslating(false);
+        setTranslatingSpeaker(null);
         setInterimText('');
       }
     },
@@ -556,73 +576,97 @@ export default function App() {
         : 'bg-slate-950 text-slate-100'
     }`}>
       {/* Top Header */}
-      <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-3 sm:px-5 py-2.5 flex items-center justify-between z-30 shrink-0">
-        <div className="flex items-center gap-2.5">
-          {/* Logo TY con iridiscencia, aura animada y brillo holográfico */}
-          <div className="relative group cursor-pointer" title="Traduce Ya">
-            <div className="absolute -inset-1 rounded-2xl iridescent-bg blur-[6px] opacity-75 group-hover:opacity-100 transition duration-700 animate-pulse" />
-            <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl iridescent-bg iridescent-shimmer-container flex items-center justify-center text-slate-950 shadow-lg font-black text-base sm:text-lg tracking-wider border border-white/40 select-none">
-              <span className="relative z-10 font-black text-slate-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]">
-                TY
-              </span>
+      <header className="bg-slate-900/95 backdrop-blur-md border-b border-slate-800 z-30 shrink-0">
+        {/* Primary Row: Always fits cleanly on mobile and desktop without clipping */}
+        <div className="px-3 sm:px-5 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Logo TY con iridiscencia */}
+            <div className="relative group cursor-pointer shrink-0" title="Traduce Ya">
+              <div className="absolute -inset-1 rounded-2xl iridescent-bg blur-[6px] opacity-75 group-hover:opacity-100 transition duration-700 animate-pulse" />
+              <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl iridescent-bg iridescent-shimmer-container flex items-center justify-center text-slate-950 shadow-lg font-black text-sm sm:text-base tracking-wider border border-white/40 select-none">
+                <span className="relative z-10 font-black text-slate-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]">
+                  TY
+                </span>
+              </div>
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-black text-sm sm:text-lg tracking-tight iridescent-text flex items-center gap-1.5 drop-shadow-sm truncate">
+                <span>Traduce Ya</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+              </h1>
+              <p className="text-[10px] text-slate-400 hidden sm:block font-medium truncate">
+                Voz en vivo cara a cara y manos libres
+              </p>
             </div>
           </div>
-          <div>
-            <h1 className="font-black text-base sm:text-lg tracking-tight iridescent-text flex items-center gap-1.5 drop-shadow-sm">
-              <span>Traduce Ya</span>
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-            </h1>
-            <p className="text-[10px] text-slate-400 hidden sm:block font-medium">
-              Voz en vivo cara a cara y manos libres
-            </p>
+
+          {/* Primary Right Controls: Mode Switcher + Ajustes (Always Visible) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex items-center bg-slate-950/80 p-0.5 sm:p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => setViewMode('facetoface')}
+                className={`flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition ${
+                  viewMode === 'facetoface'
+                    ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Modo Cara a Cara en Mesa"
+              >
+                <SplitSquareVertical className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Cara a Cara</span>
+                <span className="sm:hidden">Mesa</span>
+              </button>
+              <button
+                onClick={() => setViewMode('chat')}
+                title="Modo Bidireccional"
+                className={`flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition ${
+                  viewMode === 'chat'
+                    ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Bidireccional</span>
+                <span className="sm:hidden">Chat</span>
+              </button>
+            </div>
+
+            {/* Always-Visible Ajustes Button with label */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-500/40 text-slate-100 text-xs font-bold transition shadow-sm active:scale-95"
+              title="Abrir menú de Ajustes y Diagnóstico de Micrófono"
+            >
+              <Settings className="w-4 h-4 text-cyan-400" />
+              <span>Ajustes</span>
+            </button>
           </div>
         </div>
 
-        {/* Right utility buttons and view panels */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* Mode Switcher: Cara a Cara and Bidireccional */}
-          <div className="flex items-center bg-slate-950/80 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setViewMode('facetoface')}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                viewMode === 'facetoface'
-                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Modo Cara a Cara en Mesa"
-            >
-              <SplitSquareVertical className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Cara a Cara</span>
-              <span className="sm:hidden">Mesa</span>
-            </button>
-            <button
-              onClick={() => setViewMode('chat')}
-              title="Modo Bidireccional"
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                viewMode === 'chat'
-                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <List className="w-3.5 h-3.5" />
-              <span>Bidireccional</span>
-            </button>
-          </div>
-
-          {/* Botón Limpiar reemplazando a ? para máxima visibilidad */}
+        {/* Secondary Utility Strip: Horizontally scrollable on small screens so no tool is ever hidden */}
+        <div className="px-3 sm:px-5 pb-2 flex items-center gap-1.5 overflow-x-auto border-t border-slate-800/60 pt-1.5">
+          {/* Quick 1-Tap Audio Diagnostic */}
           <button
-            onClick={handleClearHistory}
-            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 hover:text-rose-100 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
-            title="Limpiar y vaciar historial de conversación"
+            onClick={() => setIsAudioDiagnosticOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 active:scale-95"
+            title="Probar calidad de audio, silencio y clipping del micrófono"
           >
-            <Trash2 className="w-4 h-4 text-rose-400" />
-            <span>Limpiar</span>
+            <Activity className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Diagnóstico Mic</span>
           </button>
 
-          {/* Botón Historial visible */}
+          <button
+            onClick={() => setIsQuickPhrasesOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 text-[11px] font-medium flex items-center gap-1 transition shrink-0"
+            title="Frases Rápidas"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+            <span>Frases</span>
+          </button>
+
           <button
             onClick={() => setViewMode('chat')}
-            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition shrink-0 ${
               viewMode === 'chat'
                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                 : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/50 text-slate-300 hover:text-white'
@@ -632,31 +676,37 @@ export default function App() {
             <History className="w-3.5 h-3.5 text-cyan-400" />
             <span>Historial</span>
             {turns.length > 0 && (
-              <span className="px-1.5 py-0.5 text-[10px] leading-none rounded-full bg-cyan-500 text-slate-950 font-bold ml-0.5">
+              <span className="px-1.5 py-0.5 text-[10px] leading-none rounded-full bg-cyan-500 text-slate-950 font-bold">
                 {turns.length}
               </span>
             )}
           </button>
 
-          {/* Contador de Visitas Reales (con indicador de exclusión de creador) */}
           <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-xs text-slate-300 transition shadow-sm active:scale-95 group"
-            title={
-              isCreatorUser()
-                ? `Total visitas: ${visitorStats.totalVisits} (👑 Modo Creador Activo: tus visitas no se suman al contador)`
-                : `Total visitas reales: ${visitorStats.totalVisits} | Hoy: ${visitorStats.todayVisits} | Visitantes únicos: ${visitorStats.uniqueVisitors} (Toca para ver estadísticas)`
-            }
+            onClick={handleClearHistory}
+            className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 text-[11px] font-semibold flex items-center gap-1 transition shrink-0 active:scale-95"
+            title="Limpiar y vaciar historial de conversación"
           >
-            <Eye className="w-3.5 h-3.5 text-cyan-400 group-hover:text-cyan-300 transition" />
-            <span className="font-mono text-cyan-300 font-bold">{visitorStats.totalVisits.toLocaleString()}</span>
-            {isCreatorUser() ? (
-              <span className="text-[10px] text-amber-400 font-semibold px-1 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
-                👑 Creador (Excluido)
-              </span>
-            ) : (
-              <span className="text-[10px] text-slate-400 hidden lg:inline">visitas</span>
-            )}
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Limpiar</span>
+          </button>
+
+          <button
+            onClick={() => setIsInstructionsOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1 transition shrink-0"
+            title="Instrucciones y Guía de Uso"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Guía</span>
+          </button>
+
+          <button
+            onClick={() => setIsFeedbackOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 text-[11px] font-medium flex items-center gap-1 transition shrink-0"
+            title="Buzón de sugerencias y reportes"
+          >
+            <MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Buzón</span>
           </button>
 
           {/* Monetización: Pase Ilimitado o Cupo Restante */}
@@ -669,73 +719,48 @@ export default function App() {
                 });
                 setTimeout(() => setStatusAlert(null), 4000);
               }}
-              className="px-2.5 sm:px-3 py-1.5 rounded-xl iridescent-soft-bg border border-amber-400/50 text-amber-200 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 active:scale-95 transition iridescent-shimmer-container"
+              className="px-2.5 py-1 rounded-lg iridescent-soft-bg border border-amber-400/50 text-amber-200 text-[11px] font-bold flex items-center gap-1 shadow-sm shrink-0"
               title="Pase Ilimitado Activado"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span className="hidden sm:inline">PRO Ilimitado</span>
-              <span className="sm:hidden">PRO</span>
+              <span>PRO</span>
             </button>
           ) : (
             <button
               onClick={() => setIsPaywallOpen(true)}
-              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-amber-500/15 hover:iridescent-soft-bg border border-amber-500/40 text-amber-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-sm active:scale-95"
+              className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:iridescent-soft-bg border border-amber-500/40 text-amber-300 text-[11px] font-semibold flex items-center gap-1 transition shrink-0"
               title="Ver traducciones restantes o activar Pase Ilimitado"
             >
               <Zap className="w-3.5 h-3.5 text-amber-400" />
               <span className="font-mono">{remainingQuota}</span>
-              <span className="hidden sm:inline">libres</span>
+              <span>libres</span>
             </button>
           )}
 
-          <PWAInstallButton variant="header" />
-
-          {/* Guía en grupo de utilidades */}
-          <button
-            onClick={() => setIsInstructionsOpen(true)}
-            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
-            title="Instrucciones y Guía de Uso"
-          >
-            <HelpCircle className="w-4 h-4 text-cyan-400" />
-            <span className="hidden xl:inline">Guía</span>
-          </button>
-
-          <button
-            onClick={() => setIsQuickPhrasesOpen(true)}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition"
-            title="Frases Rápidas"
-          >
-            <BookOpen className="w-4 h-4 text-amber-400" />
-            <span className="hidden md:inline">Frases</span>
-          </button>
-
-          {/* Buzón de Sugerencias y Reportes */}
-          <button
-            onClick={() => setIsFeedbackOpen(true)}
-            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition active:scale-95 group"
-            title="Buzón de sugerencias y reportes"
-          >
-            <MessageSquarePlus className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition" />
-            <span className="hidden lg:inline">Buzón</span>
-          </button>
-
+          {/* Contador de Visitas Reales */}
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white transition"
-            title="Ajustes"
+            className="px-2.5 py-1 rounded-lg bg-slate-950/80 hover:bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1 transition shrink-0"
+            title="Ver estadísticas de visitas"
           >
-            <Settings className="w-4 h-4" />
+            <Eye className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="font-mono text-cyan-300 font-bold">{visitorStats.totalVisits.toLocaleString()}</span>
+            {isCreatorUser() && (
+              <span className="text-[10px] text-amber-400 font-semibold">👑</span>
+            )}
           </button>
+
+          <PWAInstallButton variant="header" />
 
           <a
             href={typeof window !== 'undefined' ? window.location.href : '#'}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition"
-            title="Abrir app en pestaña independiente (fuera de AI Studio)"
+            className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1 transition shrink-0"
+            title="Abrir app en pestaña independiente"
           >
-            <ExternalLink className="w-4 h-4 text-cyan-400" />
-            <span className="hidden xl:inline">Nueva pestaña</span>
+            <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Nueva pestaña</span>
           </a>
         </div>
       </header>
@@ -756,15 +781,26 @@ export default function App() {
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{statusAlert.message}</span>
             {statusAlert.type === 'error' && (
-              <button
-                onClick={() => {
-                  setStatusAlert(null);
-                  setIsFeedbackOpen(true);
-                }}
-                className="text-[10px] underline font-semibold text-rose-300 hover:text-white shrink-0 ml-1.5"
-              >
-                Avisar en Buzón
-              </button>
+              <div className="flex items-center gap-2 shrink-0 ml-1.5">
+                <button
+                  onClick={() => {
+                    setStatusAlert(null);
+                    setIsAudioDiagnosticOpen(true);
+                  }}
+                  className="text-[10px] underline font-semibold text-cyan-300 hover:text-white"
+                >
+                  Diagnosticar Audio
+                </button>
+                <button
+                  onClick={() => {
+                    setStatusAlert(null);
+                    setIsFeedbackOpen(true);
+                  }}
+                  className="text-[10px] underline font-semibold text-rose-300 hover:text-white"
+                >
+                  Avisar en Buzón
+                </button>
+              </div>
             )}
           </div>
           <button
@@ -869,6 +905,7 @@ export default function App() {
             partnerAudioLevel={activeSpeaker === 'partner' ? audioLevel : 0}
             interimText={interimText}
             isTranslating={isTranslating}
+            translatingSpeaker={translatingSpeaker}
             isSpeaking={isSpeaking}
             onStartUserSpeech={() => handleStartListening('user')}
             onStopUserSpeech={handleStopListening}
@@ -1023,7 +1060,14 @@ export default function App() {
         onOpenInstructions={() => setIsInstructionsOpen(true)}
         onOpenFeedback={() => setIsFeedbackOpen(true)}
         onOpenFeedbackViewer={() => setIsFeedbackViewerOpen(true)}
+        onOpenAudioDiagnostic={() => setIsAudioDiagnosticOpen(true)}
         visitorStats={visitorStats}
+      />
+
+      <AudioDiagnosticModal
+        isOpen={isAudioDiagnosticOpen}
+        onClose={() => setIsAudioDiagnosticOpen(false)}
+        initialNoiseFilter={settings.noiseFilter !== false}
       />
 
       <FeedbackModal

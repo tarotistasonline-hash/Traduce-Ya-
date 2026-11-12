@@ -93,6 +93,7 @@ export function useSpeechRecognition({
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    analyserRef.current = null;
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -115,9 +116,11 @@ export function useSpeechRecognition({
       return;
     }
 
-    // If SpeechRecognition didn't produce text, check if we recorded audio
+    // If SpeechRecognition didn't produce text, flush recorded audio
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
     }
   }, []);
 
@@ -135,13 +138,21 @@ export function useSpeechRecognition({
       }
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    const hasActiveRecorder =
+      mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive';
+
+    if (hasActiveRecorder) {
       try {
-        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current!.stop();
       } catch {}
+      // Give MediaRecorder a brief moment to emit final dataavailable/onstop before tearing down streams
+      setTimeout(() => {
+        cleanupAudioStream();
+      }, 200);
+    } else {
+      cleanupAudioStream();
     }
 
-    cleanupAudioStream();
     setIsListening(false);
     setInterimText('');
   }, [clearSilenceTimer, cleanupAudioStream, finishUtterance]);
@@ -201,7 +212,7 @@ export function useSpeechRecognition({
         if (AudioCtx) {
           const audioCtx = new AudioCtx();
           if (audioCtx.state === 'suspended') {
-            audioCtx.resume().catch(() => {});
+            await audioCtx.resume().catch(() => {});
           }
           audioContextRef.current = audioCtx;
 
@@ -264,9 +275,8 @@ export function useSpeechRecognition({
             setAudioLevel(level);
 
             // Noise-gated voice activity detection:
-            // In noisy rooms, low background murmur (<14) is ignored.
-            const speechThreshold = noiseFilter ? 14 : 10;
-            const silenceFloor = noiseFilter ? 10 : 8;
+            const speechThreshold = noiseFilter ? 10 : 7;
+            const silenceFloor = noiseFilter ? 7 : 5;
 
             if (level > speechThreshold) {
               hasSpokenAudioRef.current = true;
@@ -419,6 +429,7 @@ export function useSpeechRecognition({
     cleanupAudioStream,
     clearSilenceTimer,
     finishUtterance,
+    noiseFilter,
     silenceTimeoutMs,
     stopListening,
   ]);

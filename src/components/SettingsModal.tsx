@@ -24,10 +24,14 @@ import {
   SlidersHorizontal,
   Inbox,
   MessageSquarePlus,
+  Activity,
+  AudioLines,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
 import { isCreatorUser, setCreatorUser } from '../utils/licenseManager';
+import { AudioDiagnosticModal } from './AudioDiagnosticModal';
+import { getApiEndpoint } from '../utils/apiConfig';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -39,6 +43,7 @@ interface SettingsModalProps {
   onOpenInstructions?: () => void;
   onOpenFeedback?: () => void;
   onOpenFeedbackViewer?: () => void;
+  onOpenAudioDiagnostic?: () => void;
   visitorStats?: {
     totalVisits: number;
     todayVisits: number;
@@ -56,10 +61,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenInstructions,
   onOpenFeedback,
   onOpenFeedbackViewer,
+  onOpenAudioDiagnostic,
   visitorStats,
 }) => {
   const [isCreator, setIsCreator] = useState(isCreatorUser);
   const [isTestingApi, setIsTestingApi] = useState(false);
+  const [isAudioDiagnosticOpen, setIsAudioDiagnosticOpen] = useState(false);
   const [testApiResult, setTestApiResult] = useState<{
     ok: boolean;
     message: string;
@@ -69,7 +76,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsTestingApi(true);
     setTestApiResult(null);
     try {
-      const res = await fetch('/api/translate', {
+      const res = await fetch(getApiEndpoint('/api/translate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,6 +128,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Settings Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Herramienta de Diagnóstico de Calidad de Audio y Micrófono (Primaria al inicio) */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-800/90 border border-cyan-500/40 shadow-lg space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-300 flex items-center justify-center border border-cyan-500/30">
+                  <Activity className="w-4 h-4 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-100 text-sm">
+                    Diagnóstico de Calidad de Audio y Micrófono
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Comprueba silencio, clipping (saturación) y escucha cómo se oye tu voz.
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold shrink-0">
+                Test en vivo
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              ¿Tu dispositivo no capta la voz o no traduce? Analiza el flujo de audio en tiempo real con osciloscopio, detecta silencio total o saturación y realiza una prueba guiada de 5 segundos.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenAudioDiagnostic) {
+                  onOpenAudioDiagnostic();
+                } else {
+                  setIsAudioDiagnosticOpen(true);
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition group"
+            >
+              <AudioLines className="w-4 h-4 group-hover:scale-110 transition-transform" />
+              <span>Abrir Diagnóstico de Micrófono</span>
+              <ChevronRight className="w-4 h-4 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </div>
+
           {/* Contador de Visitas Reales */}
           {visitorStats && (
             <div className="p-3.5 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800 border border-cyan-500/30 shadow-lg space-y-2.5">
@@ -183,35 +232,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* Gemini API Key Guide & Live Diagnostics */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-cyan-500/30 space-y-3">
+          {/* Live Translation Engine Diagnostics */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-cyan-500/30 space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                <Key className="w-4 h-4 text-cyan-400" />
-                <span>Google Gemini API</span>
+                <Sparkles className="w-4 h-4 text-cyan-400" />
+                <span>Motor de Traducción en Vivo</span>
               </div>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-500/30">
                 <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                Conectada en Servidor
+                Activo
               </span>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-700/60 text-xs text-slate-300 space-y-1.5">
-              <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
-                <span>¿Cómo configurar tu propia clave de API?</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                En <strong>Google AI Studio</strong>, las claves de API se administran de forma segura a través del entorno de la plataforma:
-              </p>
-              <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-300 pl-1">
-                <li>Ve al panel superior derecho de AI Studio.</li>
-                <li>Abre el panel <strong>Secrets (Secretos)</strong>.</li>
-                <li>Verifica que la variable <code className="text-cyan-300 bg-slate-800 px-1 py-0.5 rounded font-mono">GEMINI_API_KEY</code> contenga tu clave de Gemini.</li>
-              </ol>
-            </div>
-
-            {/* Test Connection Button */}
-            <div className="pt-1">
+            <div className="pt-0.5">
               <button
                 type="button"
                 onClick={handleTestApi}
@@ -524,6 +558,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Herramienta de Diagnóstico de Calidad de Audio y Micrófono */}
+      <AudioDiagnosticModal
+        isOpen={isAudioDiagnosticOpen}
+        onClose={() => setIsAudioDiagnosticOpen(false)}
+        initialNoiseFilter={settings.noiseFilter !== false}
+      />
     </div>
   );
 };

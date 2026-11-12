@@ -26,6 +26,7 @@ interface FaceToFaceViewProps {
   partnerAudioLevel: number;
   interimText: string;
   isTranslating: boolean;
+  translatingSpeaker?: 'user' | 'partner' | null;
   isSpeaking: boolean;
   onStartUserSpeech: () => void;
   onStopUserSpeech: () => void;
@@ -50,6 +51,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
   partnerAudioLevel,
   interimText,
   isTranslating,
+  translatingSpeaker,
   isSpeaking,
   onStartUserSpeech,
   onStopUserSpeech,
@@ -158,7 +160,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
                 "{interimText || 'Habla ahora...'}"
               </p>
             </div>
-          ) : isTranslating && latestTurn?.speaker === 'user' ? (
+          ) : isTranslating && (translatingSpeaker === 'user' || (!translatingSpeaker && latestTurn?.speaker === 'user')) ? (
             <div className="space-y-2 py-3 px-6 rounded-2xl bg-slate-900/90 border iridescent-translating-bubble animate-fade-in">
               <div className="flex items-center justify-center gap-2 iridescent-text font-bold text-sm sm:text-base">
                 <Sparkles className="w-4 h-4 animate-spin text-cyan-400" />
@@ -339,7 +341,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
                 "{interimText || 'Habla en tu idioma...'}"
               </p>
             </div>
-          ) : isTranslating && latestTurn?.speaker === 'partner' ? (
+          ) : isTranslating && (translatingSpeaker === 'partner' || (!translatingSpeaker && latestTurn?.speaker === 'partner')) ? (
             <div className="space-y-2 py-3 px-6 rounded-2xl bg-slate-900/90 border iridescent-translating-bubble animate-fade-in">
               <div className="flex items-center justify-center gap-2 iridescent-text font-bold text-sm sm:text-base">
                 <Sparkles className="w-4 h-4 animate-spin text-emerald-400" />

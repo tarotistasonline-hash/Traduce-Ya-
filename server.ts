@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 dotenv.config();
 
@@ -14,7 +14,7 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '25mb' }));
 
-// Initialize GoogleGenAI client with v1alpha for audio/TTS and multimodal features
+// Initialize GoogleGenAI client
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 
@@ -27,7 +27,6 @@ function getAiClient(): GoogleGenAI | null {
     aiClient = new GoogleGenAI({
       apiKey: currentKey,
       httpOptions: {
-        apiVersion: 'v1alpha',
         headers: {
           'User-Agent': 'aistudio-build',
         },
@@ -37,6 +36,15 @@ function getAiClient(): GoogleGenAI | null {
   return aiClient;
 }
 
+function isQuotaError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  return (
+    err?.status === 429 ||
+    msg.includes('429') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.toLowerCase().includes('quota')
+  );
+}
 
 // Health check / status
 app.get('/api/status', (req, res) => {
@@ -57,9 +65,8 @@ app.post('/api/translate', async (req, res) => {
 
     const ai = getAiClient();
     if (!ai) {
-      // Fallback response if API key is temporarily unavailable
       return res.status(503).json({
-        error: 'Servicio de IA no disponible. Verifique GEMINI_API_KEY.',
+        error: 'Servicio de IA no disponible en el servidor.',
       });
     }
 
@@ -91,26 +98,22 @@ Respond ONLY with valid JSON in this schema:
     let response;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      });
+    } catch (primaryErr: any) {
+      console.warn('gemini-4-hydrogen translate fallback to gemini-3.1-flash-lite:', primaryErr?.message || primaryErr);
+      response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
         },
       });
-    } catch (modelErr: any) {
-      // Fallback to gemini-3.1-flash-lite if quota exhausted or model unavailable
-      if (modelErr?.status === 429 || modelErr?.message?.includes('quota') || modelErr?.message?.includes('RESOURCE_EXHAUSTED')) {
-        console.warn('gemini-3.8-flash quota reached, falling back to gemini-3.1-flash-lite');
-        response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-      } else {
-        throw modelErr;
-      }
     }
 
     const rawText = response.text || '{}';
@@ -118,9 +121,9 @@ Respond ONLY with valid JSON in this schema:
     try {
       data = JSON.parse(rawText);
     } catch {
-      // Clean possible backticks
       const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      data = JSON.parse(clean);
+      const match = clean.match(/\{[\s\S]*\}/);
+      data = JSON.parse(match ? match[0] : clean);
     }
 
     return res.json({
@@ -132,9 +135,11 @@ Respond ONLY with valid JSON in this schema:
     });
   } catch (error: any) {
     console.error('Translation error:', error);
-    return res.status(500).json({
-      error: error.message || 'Error al traducir el texto.',
-    });
+    const status = isQuotaError(error) ? 429 : 500;
+    const message = isQuotaError(error)
+      ? 'Se alcanzó temporalmente el límite de solicitudes de traducción. Inténtalo de nuevo en unos segundos.'
+      : error.message || 'Error al traducir el texto.';
+    return res.status(status).json({ error: message });
   }
 });
 
@@ -201,11 +206,8 @@ app.post('/api/translate-audio', async (req, res) => {
 
     const ai = getAiClient();
     if (!ai) {
-      return res.status(200).json({
-        transcribedText: 'Audio recibido',
-        detectedLanguage: fromLang,
-        translatedText: 'Servicio de IA temporalmente no disponible.',
-        phonetic: '',
+      return res.status(503).json({
+        error: 'Servicio de IA no disponible en el servidor.',
       });
     }
 
@@ -216,108 +218,135 @@ app.post('/api/translate-audio', async (req, res) => {
       },
     };
 
-    const promptText = `Listen to this live spoken audio from a conversation.
+    const promptText = `Listen carefully to this live spoken audio from a conversation.
 Target language: ${toLang || 'Spanish'}
 Source language hint: ${fromLang || 'Auto-detect'}
 
+CRITICAL RULE:
+- ONLY transcribe actual, clearly audible human speech present in the audio.
+- If the audio is silent, near-silent, or contains only background noise/static with no intelligible spoken words, you MUST return "" for both "transcribedText" and "translatedText".
+- NEVER invent, guess, or hallucinate sentences that are not actually spoken in the audio.
+
 Tasks:
-1. Accurately transcribe what the speaker said in their original language.
-2. Translate the speech into the target language naturally and colloquially.
-3. Provide phonetic pronunciation guide for the translation.
+1. Transcribe verbatim what the speaker said in their original language (or "" if silent/no speech).
+2. Translate that speech into ${toLang || 'Spanish'} naturally and colloquially (or "" if silent/no speech).
+3. Provide phonetic pronunciation guide if helpful (otherwise "").
 
 Respond strictly with a JSON object:
 {
-  "transcribedText": "exact words spoken in original language",
-  "detectedLanguage": "name of language spoken",
-  "translatedText": "natural translation in target language",
-  "phonetic": "phonetic guide for translated text or empty string"
+  "transcribedText": "exact words spoken or empty string",
+  "detectedLanguage": "name of language spoken in Spanish",
+  "translatedText": "natural translation in target language or empty string",
+  "phonetic": "phonetic guide or empty string"
 }`;
 
     let response: any = null;
+    let lastError: any = null;
 
-    // 1. First attempt: Direct multimodal translation with gemini-3.8-flash
+    // 1. Primary: Direct multimodal translation with gemini-4-hydrogen
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: {
           parts: [audioPart, { text: promptText }],
         },
         config: {
           responseMimeType: 'application/json',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
     } catch (primaryErr: any) {
-      console.warn('gemini-3.8-flash audio notice (falling back to transcribe + translate):', primaryErr?.message || primaryErr);
+      lastError = primaryErr;
+      console.warn('gemini-4-hydrogen audio notice (trying gemini-3.1-flash-lite):', primaryErr?.message || primaryErr);
 
-      // 2. Fallback: Transcribe with gemini-3.5-transcribe, then translate with gemini-3.1-flash-lite
+      // 2. Fallback: Direct multimodal translation with gemini-3.1-flash-lite
       try {
-        const transcribeRes = await ai.models.generateContent({
-          model: 'gemini-3.5-transcribe',
-          contents: { parts: [audioPart, { text: 'Transcribe this speech verbatim.' }] },
+        response = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: {
+            parts: [audioPart, { text: promptText }],
+          },
+          config: {
+            responseMimeType: 'application/json',
+          },
         });
+      } catch (liteErr: any) {
+        lastError = liteErr;
+        console.warn('gemini-3.1-flash-lite audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
 
-        const transcribed = (transcribeRes.text || '').trim();
-
-        if (transcribed) {
-          const transRes = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
-            contents: `Translate this transcribed speech: "${transcribed}". Target language: ${toLang || 'Spanish'}. Return JSON: {"transcribedText":"${transcribed.replace(/"/g, '\\"')}","detectedLanguage":"${fromLang || 'Auto-detect'}","translatedText":"...","phonetic":""}`,
-            config: { responseMimeType: 'application/json' },
+        // 3. Last resort: Transcribe with gemini-3.5-transcribe + translate with gemini-4-hydrogen / gemini-3.1-flash-lite
+        try {
+          const transcribeRes = await ai.models.generateContent({
+            model: 'gemini-3.5-transcribe',
+            contents: { parts: [audioPart, { text: 'Transcribe this speech verbatim.' }] },
           });
-          response = transRes;
-        } else {
-          // Empty or silent audio
-          return res.status(200).json({
-            transcribedText: 'Audio sin palabras detectadas',
-            detectedLanguage: fromLang,
-            translatedText: 'Por favor, habla más cerca del micrófono.',
-            phonetic: '',
-          });
+          const transcribed = (transcribeRes.text || '').trim();
+          if (transcribed) {
+            const transRes = await ai.models.generateContent({
+              model: 'gemini-3.1-flash-lite',
+              contents: `Translate this transcribed speech: "${transcribed}". Target language: ${toLang || 'Spanish'}. Return JSON: {"transcribedText":"${transcribed.replace(/"/g, '\\"')}","detectedLanguage":"${fromLang || 'Auto-detect'}","translatedText":"...","phonetic":""}`,
+              config: { responseMimeType: 'application/json' },
+            });
+            response = transRes;
+          } else {
+            return res.status(200).json({
+              transcribedText: '',
+              detectedLanguage: fromLang,
+              translatedText: '',
+              phonetic: '',
+              noSpeech: true,
+            });
+          }
+        } catch (transcribeErr: any) {
+          lastError = transcribeErr;
+          console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
         }
-      } catch (fallbackErr: any) {
-        console.warn('Fallback transcription notice:', fallbackErr?.message || fallbackErr);
-        // Return 200 with guidance so the app never crashes
-        return res.status(200).json({
-          transcribedText: 'Audio recibido',
-          detectedLanguage: fromLang,
-          translatedText: 'Audio recibido pero no se pudo distinguir la voz con claridad. Por favor repite la frase.',
-          phonetic: '',
-        });
       }
     }
 
-    const rawText = (response && response.text) ? response.text : '{}';
+    if (!response) {
+      const status = isQuotaError(lastError) ? 429 : 500;
+      const message = isQuotaError(lastError)
+        ? 'Se alcanzó el límite de solicitudes de traducción de audio. Espera un momento o usa el micrófono nuevamente.'
+        : lastError?.message || 'No se pudo procesar el audio en el servidor.';
+      return res.status(status).json({ error: message });
+    }
+
+    const rawText = response.text ? response.text : '{}';
     let data: any = {};
     try {
-      const match = rawText.match(/\{[\s\S]*\}/);
-      if (match) {
-        data = JSON.parse(match[0]);
-      } else {
-        data = JSON.parse(rawText);
-      }
+      const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const match = clean.match(/\{[\s\S]*\}/);
+      data = JSON.parse(match ? match[0] : clean);
     } catch {
       data = {
         transcribedText: 'Voz detectada',
         detectedLanguage: fromLang,
-        translatedText: rawText.replace(/```[a-z]*/g, '').trim() || 'Traducción completada.',
+        translatedText: rawText.replace(/```[a-z]*/g, '').trim(),
         phonetic: '',
       };
+    }
+
+    if (!data.transcribedText && !data.translatedText) {
+      return res.status(200).json({
+        transcribedText: '',
+        detectedLanguage: fromLang,
+        translatedText: '',
+        phonetic: '',
+        noSpeech: true,
+      });
     }
 
     return res.json({
       transcribedText: data.transcribedText || 'Audio recibido',
       detectedLanguage: data.detectedLanguage || fromLang,
-      translatedText: data.translatedText || 'Traducción lista.',
+      translatedText: data.translatedText || '',
       phonetic: data.phonetic || '',
     });
   } catch (error: any) {
     console.error('Audio translate global handler:', error);
-    // Return friendly 200 status so client never breaks with "Error al procesar audio"
-    return res.status(200).json({
-      transcribedText: 'Audio recibido',
-      detectedLanguage: fromLang,
-      translatedText: 'Por favor intenta hablar nuevamente cerca del micrófono.',
-      phonetic: '',
+    return res.status(500).json({
+      error: error?.message || 'Error interno al procesar el audio.',
     });
   }
 });

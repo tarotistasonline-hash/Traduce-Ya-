@@ -14,6 +14,7 @@ export interface AudioTranslateResponse {
   detectedLanguage?: string;
   translatedText: string;
   phonetic?: string;
+  noSpeech?: boolean;
 }
 
 export async function translateText(
@@ -48,8 +49,13 @@ export async function translateText(
       if (retryRes.ok) {
         return await retryRes.json();
       }
-    } catch (retryErr) {
+      const retryErr = await retryRes.json().catch(() => ({}));
+      if (retryErr?.error) {
+        throw new Error(retryErr.error);
+      }
+    } catch (retryErr: any) {
       console.warn('Retry also failed:', retryErr);
+      throw retryErr;
     }
 
     throw err;
@@ -61,52 +67,41 @@ export async function translateAudioBlob(
   fromLang: string,
   toLang: string
 ): Promise<AudioTranslateResponse> {
-  try {
-    const audioBase64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
-        const base64 = dataUrl.split(',')[1] || '';
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(audioBlob);
-    });
+  const audioBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(audioBlob);
+  });
 
-    const url = getApiEndpoint('/api/translate-audio');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        audioBase64,
-        mimeType: audioBlob.type || 'audio/webm',
-        fromLang,
-        toLang,
-      }),
-    });
+  const url = getApiEndpoint('/api/translate-audio');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      audioBase64,
+      mimeType: audioBlob.type || 'audio/webm',
+      fromLang,
+      toLang,
+    }),
+  });
 
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        transcribedText: data.transcribedText || '',
-        detectedLanguage: data.detectedLanguage || fromLang,
-        translatedText: data.translatedText || '',
-        phonetic: data.phonetic || '',
-      };
-    }
-
+  if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
-    console.warn('translateAudioBlob endpoint error:', res.status, errorData);
-  } catch (err) {
-    console.warn('translateAudioBlob notice:', err);
+    throw new Error(errorData.error || `Error ${res.status} al traducir audio`);
   }
 
-  // Graceful fallback response so the conversation is not interrupted
+  const data = await res.json();
   return {
-    transcribedText: 'Audio recibido',
-    detectedLanguage: fromLang,
-    translatedText: 'Audio procesado. Por favor intenta hablar más claro o cerca del micrófono.',
-    phonetic: '',
+    transcribedText: data.transcribedText || '',
+    detectedLanguage: data.detectedLanguage || fromLang,
+    translatedText: data.translatedText || '',
+    phonetic: data.phonetic || '',
+    noSpeech: Boolean(data.noSpeech),
   };
 }
 
