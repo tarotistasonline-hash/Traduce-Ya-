@@ -30,8 +30,8 @@ export const INSTRUCTIONS_LOCALES: Record<string, InstructionLocale> = {
         badge: 'Recomendado',
       },
       {
-        title: '2. Distancia y Captación de Voz',
-        desc: 'El micrófono capta la voz a distancia de mesa (1 a 2 metros). Si el ambiente es ruidoso (cafeterías, aeropuertos), acerca suavemente el móvil a la persona mientras habla para una transcripción perfecta.',
+        title: '2. Distancia y Filtro de Ruido Exterior',
+        desc: 'El micrófono capta la voz a distancia de mesa (1 a 2 metros) con aislamiento de voz acústico que filtra el murmullo de restaurantes, platos y tráfico. Si el ambiente es extremadamente ruidoso, basta con acercar suavemente el móvil a la persona.',
         iconName: 'mic',
       },
       {

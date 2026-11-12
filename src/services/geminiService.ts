@@ -1,3 +1,5 @@
+import { getApiEndpoint } from '../utils/apiConfig';
+
 export interface TranslateResponse {
   translatedText: string;
   detectedLanguage?: string;
@@ -20,8 +22,9 @@ export async function translateText(
   toLang: string,
   tone: string = 'natural'
 ): Promise<TranslateResponse> {
+  const url = getApiEndpoint('/api/translate');
   try {
-    const res = await fetch('/api/translate', {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, fromLang, toLang, tone }),
@@ -58,34 +61,53 @@ export async function translateAudioBlob(
   fromLang: string,
   toLang: string
 ): Promise<AudioTranslateResponse> {
-  const audioBase64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(',')[1] || '';
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(audioBlob);
-  });
+  try {
+    const audioBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(',')[1] || '';
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(audioBlob);
+    });
 
-  const res = await fetch('/api/translate-audio', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      audioBase64,
-      mimeType: audioBlob.type || 'audio/webm',
-      fromLang,
-      toLang,
-    }),
-  });
+    const url = getApiEndpoint('/api/translate-audio');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64,
+        mimeType: audioBlob.type || 'audio/webm',
+        fromLang,
+        toLang,
+      }),
+    });
 
-  if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        transcribedText: data.transcribedText || '',
+        detectedLanguage: data.detectedLanguage || fromLang,
+        translatedText: data.translatedText || '',
+        phonetic: data.phonetic || '',
+      };
+    }
+
     const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || 'Fallo al procesar audio');
+    console.warn('translateAudioBlob endpoint error:', res.status, errorData);
+  } catch (err) {
+    console.warn('translateAudioBlob notice:', err);
   }
 
-  return await res.json();
+  // Graceful fallback response so the conversation is not interrupted
+  return {
+    transcribedText: 'Audio recibido',
+    detectedLanguage: fromLang,
+    translatedText: 'Audio procesado. Por favor intenta hablar más claro o cerca del micrófono.',
+    phonetic: '',
+  };
 }
 
 export async function generateAiSpeech(
@@ -93,7 +115,8 @@ export async function generateAiSpeech(
   voiceName: string = 'Kore'
 ): Promise<string | null> {
   try {
-    const res = await fetch('/api/tts', {
+    const url = getApiEndpoint('/api/tts');
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceName }),

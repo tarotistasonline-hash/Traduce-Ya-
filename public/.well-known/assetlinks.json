@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.traduceya.app",
+      "package_name": "app.run.europe_west1.traductor_ya_traductor_de_voz_y_conversaci_n_633978869738.twa",
       "sha256_cert_fingerprints": [
-        "14:6D:E9:7D:0F:52:AB:FC:99:98:5A:F9:6B:43:83:B9:9E:0B:4D:48:8D:1A:F3:33:47:67:33:0A:42:F2:F7:55"
+        "1A:85:DA:BC:7C:3B:BA:0B:DF:16:97:3A:92:F0:E6:13:27:6B:0F:E9:D3:FB:DB:78:C3:0B:45:EF:6F:2B:20:3C"
       ]
     }
   }
