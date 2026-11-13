@@ -9,10 +9,25 @@ export interface VisitorStats {
 
 const STORAGE_KEY = 'ty_visitor_stats_v1';
 const SESSION_TIMESTAMP_KEY = 'ty_last_visit_time_v1';
+const VISITOR_ID_KEY = 'ty_visitor_uuid_v1';
+
+function getOrCreateVisitorId(): string {
+  if (typeof window === 'undefined') return 'server';
+  try {
+    let id = localStorage.getItem(VISITOR_ID_KEY);
+    if (!id) {
+      id = 'v_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      localStorage.setItem(VISITOR_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    return 'anon';
+  }
+}
 
 export function getCachedVisitorStats(): VisitorStats {
   if (typeof window === 'undefined') {
-    return { totalVisits: 28, todayVisits: 8, uniqueVisitors: 19 };
+    return { totalVisits: 38, todayVisits: 12, uniqueVisitors: 24 };
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -23,25 +38,26 @@ export function getCachedVisitorStats(): VisitorStats {
       }
     }
   } catch {}
-  return { totalVisits: 28, todayVisits: 8, uniqueVisitors: 19 };
+  return { totalVisits: 38, todayVisits: 12, uniqueVisitors: 24 };
 }
 
 export async function fetchAndRecordVisit(): Promise<VisitorStats> {
   const isCreator = isCreatorUser();
   const cached = getCachedVisitorStats();
 
-  // If user is creator, EXCLUDE from visitor counter completely!
+  // If user is creator, don't record to avoid skewing stats during testing
   if (isCreator) {
     return cached;
   }
 
   const now = Date.now();
   let shouldIncrementSession = true;
+  const visitorId = getOrCreateVisitorId();
 
   if (typeof window !== 'undefined') {
     try {
       const lastTime = sessionStorage.getItem(SESSION_TIMESTAMP_KEY);
-      // If refreshed within 20 seconds, don't spam duplicate count in the exact same second
+      // Avoid duplicate hits from fast reloads within 20s
       if (lastTime && now - Number(lastTime) < 20000) {
         shouldIncrementSession = false;
       }
@@ -57,7 +73,7 @@ export async function fetchAndRecordVisit(): Promise<VisitorStats> {
         'Content-Type': 'application/json',
       },
       body: shouldIncrementSession
-        ? JSON.stringify({ clientReportedTotal: cached.totalVisits, isCreator })
+        ? JSON.stringify({ clientReportedTotal: cached.totalVisits, isCreator, visitorId })
         : undefined,
     });
 

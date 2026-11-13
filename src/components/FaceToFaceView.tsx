@@ -38,6 +38,8 @@ interface FaceToFaceViewProps {
   onOpenPartnerLangModal: () => void;
   onOpenFullScreen: (turn: ConversationTurn) => void;
   onOpenTextInput?: (speaker: 'user' | 'partner') => void;
+  isPro?: boolean;
+  remainingQuota?: number;
 }
 
 export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
@@ -63,6 +65,8 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
   onOpenPartnerLangModal,
   onOpenFullScreen,
   onOpenTextInput,
+  isPro,
+  remainingQuota,
 }) => {
   const [partnerFlipped, setPartnerFlipped] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -226,12 +230,14 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               </div>
             </div>
           ) : (
-            <div className="text-slate-500 text-center space-y-0.5 py-1">
+            <div className="text-slate-500 text-center space-y-1 py-1">
               <p className="text-sm sm:text-base font-medium text-slate-300">
-                Coloca el móvil hacia tu interlocutor
+                Coloca el móvil hacia tu interlocutor o en la mesa
               </p>
-              <p className="text-[11px] text-slate-500 max-w-xs">
-                Pulsa el botón de abajo o activa "Manos Libres" para hablar.
+              <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                {isPro
+                  ? 'Pulsa el botón de abajo o activa "Manos Libres" para conversar sin límites.'
+                  : '🎁 Tienes 2 consultas gratuitas de prueba. Pulsa para hablar sin costo.'}
               </p>
             </div>
           )}
@@ -407,12 +413,14 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               </div>
             </div>
           ) : (
-            <div className="text-slate-500 text-center space-y-0.5 py-1">
+            <div className="text-slate-500 text-center space-y-1 py-1">
               <p className="text-sm sm:text-base font-medium text-slate-300">
                 Habla en tu idioma ({userLang.name})
               </p>
-              <p className="text-[11px] text-slate-500 max-w-xs">
-                Pulsa el botón verde para hablar o usa "Manos Libres" en mesa.
+              <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                {isPro
+                  ? 'Pulsa el botón verde para hablar o usa "Manos Libres" en mesa.'
+                  : '🎁 Tienes 2 consultas gratuitas de prueba. ¡No pagas por cada consulta!'}
               </p>
             </div>
           )}

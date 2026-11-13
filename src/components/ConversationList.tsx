@@ -24,6 +24,7 @@ interface ConversationListProps {
   onOpenFullScreen: (turn: ConversationTurn) => void;
   onClearHistory?: () => void;
   fontSize: 'normal' | 'large' | 'huge';
+  isPro?: boolean;
 }
 
 export const ConversationList: React.FC<ConversationListProps> = ({
@@ -37,6 +38,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   onOpenFullScreen,
   onClearHistory,
   fontSize,
+  isPro,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [slowAudioId, setSlowAudioId] = useState<string | null>(null);
@@ -90,13 +92,18 @@ export const ConversationList: React.FC<ConversationListProps> = ({
           <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
             <Mic className="w-8 h-8" />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-100">
               Conversación bidireccional lista
             </h3>
             <p className="text-sm text-slate-400">
               Habla tú o acerca el móvil a la otra persona. Todo lo que digan se traducirá y reproducirá al instante.
             </p>
+            {!isPro && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
+                <span>🎁 2 consultas gratuitas de prueba · Sin costo por frase</span>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3 w-full pt-2">
             <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-left">

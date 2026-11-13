@@ -27,6 +27,7 @@ import {
   MessageSquarePlus,
   Inbox,
   Activity,
+  Gift,
 } from 'lucide-react';
 import { fetchAndRecordVisit, getCachedVisitorStats, VisitorStats } from './services/visitorService';
 
@@ -454,7 +455,21 @@ export default function App() {
       try {
         const result = await translateAudioBlob(audioBlob, fromLangParam, toLangParam);
 
-        if (result.noSpeech || !result.translatedText) {
+        let finalTranslatedText = result.translatedText;
+        const finalTranscribedText = result.transcribedText;
+
+        // If transcribed text exists but translatedText was empty, translate it via text fallback
+        if (!finalTranslatedText && finalTranscribedText) {
+          try {
+            const fallbackRes = await translateText(finalTranscribedText, fromLangParam, toLangParam);
+            finalTranslatedText = fallbackRes.translatedText;
+          } catch (e) {
+            console.warn('Fallback translateText failed:', e);
+            finalTranslatedText = finalTranscribedText;
+          }
+        }
+
+        if (result.noSpeech || (!finalTranslatedText && !finalTranscribedText)) {
           setStatusAlert({
             message: 'No se detectó voz con claridad. Habla más cerca del micrófono o usa "Diagnóstico Mic".',
             type: 'error',
@@ -480,8 +495,8 @@ export default function App() {
         const newTurn: ConversationTurn = {
           id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           speaker,
-          originalText: result.transcribedText || 'Audio recibido',
-          translatedText: result.translatedText,
+          originalText: finalTranscribedText || 'Audio recibido',
+          translatedText: finalTranslatedText || 'Audio recibido',
           sourceLang: sourceLanguage.code,
           targetLang: targetSpeechCode,
           detectedLanguage: result.detectedLanguage,
@@ -498,8 +513,8 @@ export default function App() {
         }
 
         // Auto speak translation immediately!
-        if (settings.autoSpeak) {
-          speak(result.translatedText, targetSpeechCode, {
+        if (settings.autoSpeak && finalTranslatedText) {
+          speak(finalTranslatedText, targetSpeechCode, {
             speed: settings.voiceSpeed,
             preferAi: settings.useAiVoice,
           });
@@ -728,12 +743,28 @@ export default function App() {
           ) : (
             <button
               onClick={() => setIsPaywallOpen(true)}
-              className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:iridescent-soft-bg border border-amber-500/40 text-amber-300 text-[11px] font-semibold flex items-center gap-1 transition shrink-0"
-              title="Ver traducciones restantes o activar Pase Ilimitado"
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 shadow-sm ${
+                remainingQuota > 0
+                  ? 'bg-emerald-500/20 hover:bg-emerald-500/30 border-emerald-500/50 text-emerald-300'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/50 text-amber-300'
+              }`}
+              title={
+                remainingQuota > 0
+                  ? `Tienes ${remainingQuota} de 2 consultas gratuitas de prueba. Clic para ver detalles.`
+                  : 'Completaste tus 2 consultas gratis. Clic para activar Pase Ilimitado.'
+              }
             >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-mono">{remainingQuota}</span>
-              <span>libres</span>
+              {remainingQuota > 0 ? (
+                <>
+                  <Gift className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  <span>{remainingQuota} de 2 gratis</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>0 de 2 gratis</span>
+                </>
+              )}
             </button>
           )}
 
@@ -809,6 +840,30 @@ export default function App() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* 2 Consultas Gratuitas Clarification Banner */}
+      {!isPro && (
+        <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-cyan-950/90 border-b border-emerald-500/30 px-3 py-1.5 text-xs text-slate-200 flex items-center justify-between shrink-0 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+            <span className="p-0.5 rounded-md bg-emerald-500/20 text-emerald-300 shrink-0">
+              <Gift className="w-3.5 h-3.5 text-emerald-400" />
+            </span>
+            <span className="truncate text-[11px] sm:text-xs">
+              <strong className="text-emerald-300 font-bold">2 consultas gratis:</strong> Pruébalo sin costo.{' '}
+              <span className="text-slate-300 hidden md:inline">¡No cobramos por cada consulta!</span>
+              <button
+                onClick={() => setIsPaywallOpen(true)}
+                className="underline text-cyan-300 hover:text-white ml-1.5 font-semibold inline"
+              >
+                ¿Cómo funciona?
+              </button>
+            </span>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 ml-2">
+            {remainingQuota} / 2 disponibles
+          </span>
         </div>
       )}
 
@@ -926,6 +981,8 @@ export default function App() {
               setTextInputSpeaker(speaker);
               setIsTextInputOpen(true);
             }}
+            isPro={isPro}
+            remainingQuota={remainingQuota}
           />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden">
@@ -946,6 +1003,7 @@ export default function App() {
               onOpenFullScreen={(turn) => setFullScreenTurn(turn)}
               onClearHistory={handleClearHistory}
               fontSize={settings.fontSize}
+              isPro={isPro}
             />
 
             {/* Bottom floating control bar in chat mode */}
@@ -1061,6 +1119,9 @@ export default function App() {
         onOpenFeedback={() => setIsFeedbackOpen(true)}
         onOpenFeedbackViewer={() => setIsFeedbackViewerOpen(true)}
         onOpenAudioDiagnostic={() => setIsAudioDiagnosticOpen(true)}
+        onOpenPaywall={() => setIsPaywallOpen(true)}
+        isPro={isPro}
+        remainingQuota={remainingQuota}
         visitorStats={visitorStats}
       />
 

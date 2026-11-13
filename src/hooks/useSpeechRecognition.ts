@@ -27,7 +27,7 @@ export function useSpeechRecognition({
   onAudioRecorded,
   onEnd,
   onError,
-  silenceTimeoutMs = 950,
+  silenceTimeoutMs = 1500,
   noiseFilter = true,
 }: UseSpeechRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
@@ -248,16 +248,13 @@ export function useSpeechRecognition({
             hpFilter.connect(voiceFilter);
             voiceFilter.connect(lpFilter);
             lpFilter.connect(analyser);
-
-            // Connect isolated audio into MediaStreamDestination for clean MediaRecorder capture
-            const dest = audioCtx.createMediaStreamDestination();
-            lpFilter.connect(dest);
-            if (dest.stream && dest.stream.getAudioTracks().length > 0) {
-              recordStream = dest.stream;
-            }
           } else {
             source.connect(analyser);
           }
+
+          // Always record from direct hardware mic stream (with native WebRTC echo & noise suppression)
+          // to ensure 100% compatibility across iOS Safari, Chrome Mobile, and Android WebViews
+          recordStream = stream;
 
           const bufferLength = analyser.frequencyBinCount;
           const dataArray = new Uint8Array(bufferLength);
@@ -292,7 +289,7 @@ export function useSpeechRecognition({
                     stopListening();
                     onEndRef.current?.();
                   }
-                }, 1200);
+                }, 1600);
               }
             }
 
@@ -330,7 +327,7 @@ export function useSpeechRecognition({
               const audioBlob = new Blob(audioChunksRef.current, {
                 type: mimeType || 'audio/webm',
               });
-              if (audioBlob.size > 500) {
+              if (audioBlob.size > 200) {
                 hasDispatchedRef.current = true;
                 onAudioRecordedRef.current?.(audioBlob);
               }

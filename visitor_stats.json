@@ -1,9 +1,10 @@
 {
-  "totalVisits": 36,
-  "uniqueVisitors": 19,
-  "today": "2026-11-11",
-  "todayVisits": 10,
+  "totalVisits": 39,
+  "uniqueVisitors": 25,
+  "today": "2026-11-13",
+  "todayVisits": 2,
   "recentHashes": [
-    "c2906bd26cb77782"
+    "c2906bd26cb77782",
+    "test_visitor_123"
   ]
 }

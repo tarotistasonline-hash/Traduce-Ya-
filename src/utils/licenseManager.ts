@@ -1,6 +1,6 @@
 // License and usage quota manager for Traduce Ya
 
-export const DAILY_FREE_LIMIT = 9;
+export const DAILY_FREE_LIMIT = 2;
 
 const STORAGE_KEY_PRO = 'traductor_ya_pro_v1';
 const STORAGE_KEY_CREATOR = 'traductor_ya_creator_mode_v1';
@@ -33,28 +33,20 @@ export function getTodayDateString(): string {
 }
 
 export function isCreatorUser(): boolean {
-  if (typeof window === 'undefined') return true;
+  if (typeof window === 'undefined') return false;
   try {
-    // 1. Manually saved in localStorage
+    // 1. Manually saved in localStorage by the owner
     if (localStorage.getItem(STORAGE_KEY_CREATOR) === 'true') {
       return true;
     }
 
-    // 2. Query param ?creator=true, ?creador=true, ?dev=true, ?admin=true
+    // 2. Query param ?creator=true, ?creador=true, ?admin=true
     const params = new URLSearchParams(window.location.search);
     if (
       params.get('creator') === 'true' ||
       params.get('creador') === 'true' ||
-      params.get('dev') === 'true' ||
       params.get('admin') === 'true'
     ) {
-      localStorage.setItem(STORAGE_KEY_CREATOR, 'true');
-      return true;
-    }
-
-    // 3. Auto-detected development & preview environments (localhost or ais-dev-*)
-    const host = window.location.hostname || '';
-    if (host === 'localhost' || host === '127.0.0.1' || host.includes('ais-dev')) {
       localStorage.setItem(STORAGE_KEY_CREATOR, 'true');
       return true;
     }
