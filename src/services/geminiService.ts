@@ -67,35 +67,101 @@ export async function translateAudioBlob(
   fromLang: string,
   toLang: string
 ): Promise<AudioTranslateResponse> {
-  const audioBase64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(',')[1] || '';
-      resolve(base64);
+  if (!audioBlob || audioBlob.size < 250) {
+    console.warn('[translateAudioBlob] Audio blob is too small (<250 bytes), likely empty recording:', audioBlob?.size);
+    return {
+      transcribedText: '',
+      detectedLanguage: fromLang,
+      translatedText: '',
+      phonetic: '',
+      noSpeech: true,
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(audioBlob);
-  });
-
-  const url = getApiEndpoint('/api/translate-audio');
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      audioBase64,
-      mimeType: audioBlob.type || 'audio/webm',
-      fromLang,
-      toLang,
-    }),
-  });
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Error ${res.status} al traducir audio`);
   }
 
-  const data = await res.json();
+  let audioBase64 = '';
+  try {
+    audioBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        try {
+          const dataUrl = (reader.result as string) || '';
+          const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+          if (!base64 || base64.trim() === '') {
+            reject(new Error('Audio base64 payload is empty after reading Blob'));
+          } else {
+            resolve(base64);
+          }
+        } catch (parseErr) {
+          reject(parseErr);
+        }
+      };
+      reader.onerror = () => reject(new Error('FileReader error while reading audio blob'));
+      reader.readAsDataURL(audioBlob);
+    });
+  } catch (readerErr: any) {
+    console.error('[translateAudioBlob] Error converting blob to base64:', readerErr);
+    throw new Error('No se pudo procesar el archivo de audio local.');
+  }
+
+  const primaryUrl = getApiEndpoint('/api/translate-audio');
+  const payload = {
+    audioBase64,
+    mimeType: audioBlob.type || 'audio/webm',
+    fromLang,
+    toLang,
+  };
+
+  let res: Response | null = null;
+
+  try {
+    console.log('[translateAudioBlob] Sending audio to server:', {
+      url: primaryUrl,
+      blobSize: audioBlob.size,
+      mimeType: audioBlob.type,
+      fromLang,
+      toLang,
+    });
+    res = await fetch(primaryUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (primaryFetchErr: any) {
+    console.warn('[translateAudioBlob] Primary fetch failed, attempting relative fallback (/api/translate-audio):', primaryFetchErr);
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      res = await fetch('/api/translate-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (fallbackErr: any) {
+      console.error('[translateAudioBlob] Both endpoints failed to fetch:', fallbackErr);
+      throw new Error('No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.');
+    }
+  }
+
+  if (!res || !res.ok) {
+    const errorData = await res?.json().catch(() => ({}));
+    const errorMsg = errorData?.error || `Error ${res?.status || 500} al procesar audio en servidor`;
+    console.error('[translateAudioBlob] Server returned error response:', { status: res?.status, errorMsg });
+    throw new Error(errorMsg);
+  }
+
+  let data: any = {};
+  try {
+    data = await res.json();
+    console.log('[translateAudioBlob] Received response from server:', {
+      hasTranscript: Boolean(data.transcribedText),
+      hasTranslation: Boolean(data.translatedText),
+      noSpeech: Boolean(data.noSpeech),
+      detectedLanguage: data.detectedLanguage,
+    });
+  } catch (jsonErr) {
+    console.error('[translateAudioBlob] Failed to parse JSON response:', jsonErr);
+    throw new Error('Respuesta inválida del servidor de traducción.');
+  }
+
   return {
     transcribedText: data.transcribedText || '',
     detectedLanguage: data.detectedLanguage || fromLang,

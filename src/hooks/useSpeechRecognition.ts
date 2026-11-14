@@ -9,6 +9,14 @@ declare global {
   }
 }
 
+// Check whether any audio track in a MediaStream is active, enabled, and unmuted
+export function isAudioTrackActive(stream: MediaStream | null): boolean {
+  if (!stream) return false;
+  const tracks = stream.getAudioTracks();
+  if (tracks.length === 0) return false;
+  return tracks.some((t) => t.readyState === 'live' && t.enabled && !t.muted);
+}
+
 interface UseSpeechRecognitionOptions {
   lang: string;
   onResult: (currentText: string, isInterim: boolean) => void;
@@ -323,13 +331,28 @@ export function useSpeechRecognition({
           };
 
           recorder.onstop = () => {
+            const trackActive = isAudioTrackActive(mediaStreamRef.current);
+            console.log('[useSpeechRecognition] recorder onstop fired:', {
+              chunksCount: audioChunksRef.current.length,
+              hasDispatched: hasDispatchedRef.current,
+              trackActive,
+            });
+
             if (!hasDispatchedRef.current && audioChunksRef.current.length > 0) {
               const audioBlob = new Blob(audioChunksRef.current, {
                 type: mimeType || 'audio/webm',
               });
-              if (audioBlob.size > 200) {
+              console.log('[useSpeechRecognition] Generated audioBlob:', {
+                size: audioBlob.size,
+                type: audioBlob.type,
+                trackActive,
+              });
+
+              if (audioBlob.size > 250) {
                 hasDispatchedRef.current = true;
                 onAudioRecordedRef.current?.(audioBlob);
+              } else {
+                console.warn('[useSpeechRecognition] Audio blob too small (<250 bytes), skipped dispatch.');
               }
             }
           };
@@ -444,5 +467,6 @@ export function useSpeechRecognition({
     audioLevel,
     startListening,
     stopListening,
+    isAudioTrackActive: () => isAudioTrackActive(mediaStreamRef.current),
   };
 }

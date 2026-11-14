@@ -66,6 +66,7 @@ import { PaywallModal } from './components/PaywallModal';
 import { FeedbackModal } from './components/FeedbackModal';
 import { FeedbackViewerModal } from './components/FeedbackViewerModal';
 import { AudioDiagnosticModal } from './components/AudioDiagnosticModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   isProUser,
   isCreatorUser,
@@ -125,7 +126,18 @@ export default function App() {
   const [translatingSpeaker, setTranslatingSpeaker] = useState<'user' | 'partner' | null>(null);
   const [interimText, setInterimText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
-  const [isContinuous, setIsContinuous] = useState(false);
+  const [isContinuous, setIsContinuous] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.continuousListen === 'boolean') {
+          return parsed.continuousListen;
+        }
+      }
+    } catch {}
+    return false;
+  });
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   // Modals state
@@ -452,6 +464,25 @@ export default function App() {
             : 'Español'
           : targetLanguage.name;
 
+      console.log('[App:handleProcessAudio] Received audio chunk:', {
+        blobSize: audioBlob?.size,
+        blobType: audioBlob?.type,
+        speaker,
+      });
+
+      if (!audioBlob || audioBlob.size < 250) {
+        console.warn('[App:handleProcessAudio] Audio blob too small or empty (<250 bytes).');
+        setStatusAlert({
+          message: 'No se detectó audio audible. Habla un poco más fuerte o acércate al micrófono.',
+          type: 'info',
+        });
+        setTimeout(() => setStatusAlert(null), 5000);
+        setIsTranslating(false);
+        setTranslatingSpeaker(null);
+        setInterimText('');
+        return;
+      }
+
       try {
         const result = await translateAudioBlob(audioBlob, fromLangParam, toLangParam);
 
@@ -531,9 +562,13 @@ export default function App() {
           }, 2500);
         }
       } catch (err: any) {
-        console.warn('Audio translation notice:', err);
+        console.error('[App:handleProcessAudio] Audio translation failure:', err);
+        const errorText =
+          err?.message?.includes('Failed to fetch') || err?.message?.includes('conectar con el servidor')
+            ? 'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.'
+            : err?.message || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.';
         setStatusAlert({
-          message: err?.message || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.',
+          message: errorText,
           type: 'error',
         });
         setTimeout(() => setStatusAlert(null), 7000);
@@ -557,6 +592,52 @@ export default function App() {
   const handleSelectQuickPhrase = (phrase: string) => {
     handleProcessSpeech(phrase, 'user');
   };
+
+  // Toggle & Remember Modo Mesa Manos Libres
+  const handleToggleContinuous = useCallback(
+    (targetState?: boolean) => {
+      setIsContinuous((prev) => {
+        const nextVal = typeof targetState === 'boolean' ? targetState : !prev;
+
+        // Persist in settings so the app always remembers this preference
+        setSettings((current) => {
+          const updated = { ...current, continuousListen: nextVal };
+          try {
+            localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+
+        if (nextVal) {
+          setStatusAlert({
+            message: '🎙️ Modo Mesa Manos Libres ACTIVADO: Coloca el móvil sobre la mesa. La app alternará turnos automáticamente.',
+            type: 'success',
+          });
+          setTimeout(() => setStatusAlert(null), 6000);
+
+          if (settings.hapticFeedback && 'vibrate' in navigator) {
+            navigator.vibrate?.([40, 60, 40]);
+          }
+
+          // If nobody is speaking, start listening automatically after a brief beat
+          if (!activeSpeaker && !isTranslating) {
+            setTimeout(() => {
+              handleStartListeningRef.current('user');
+            }, 600);
+          }
+        } else {
+          setStatusAlert({
+            message: 'Modo Mesa Manos Libres pausado (control manual por botones activado).',
+            type: 'info',
+          });
+          setTimeout(() => setStatusAlert(null), 3500);
+        }
+
+        return nextVal;
+      });
+    },
+    [activeSpeaker, isTranslating, settings.hapticFeedback]
+  );
 
   // Clear conversation history
   const handleClearHistory = useCallback(() => {
@@ -660,6 +741,20 @@ export default function App() {
 
         {/* Secondary Utility Strip: Horizontally scrollable on small screens so no tool is ever hidden */}
         <div className="px-3 sm:px-5 pb-2 flex items-center gap-1.5 overflow-x-auto border-t border-slate-800/60 pt-1.5">
+          {/* Quick Toggle for Modo Mesa / Manos Libres with Reminder Badge */}
+          <button
+            onClick={() => handleToggleContinuous()}
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 active:scale-95 ${
+              isContinuous
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                : 'bg-emerald-950/40 hover:bg-emerald-900/40 border-emerald-500/40 text-emerald-300 shadow-sm'
+            }`}
+            title="Recordatorio: Activar o desactivar Modo Mesa Manos Libres"
+          >
+            <Radio className={`w-3.5 h-3.5 ${isContinuous ? 'text-emerald-400 animate-pulse' : 'text-emerald-400'}`} />
+            <span>{isContinuous ? 'Mesa Manos Libres: ON' : '💡 Activar Modo Mesa'}</span>
+          </button>
+
           {/* Quick 1-Tap Audio Diagnostic */}
           <button
             onClick={() => setIsAudioDiagnosticOpen(true)}
@@ -966,7 +1061,7 @@ export default function App() {
             onStopUserSpeech={handleStopListening}
             onStartPartnerSpeech={() => handleStartListening('partner')}
             onStopPartnerSpeech={handleStopListening}
-            onToggleContinuous={() => setIsContinuous((prev) => !prev)}
+            onToggleContinuous={() => handleToggleContinuous()}
             onSpeakText={(text, langCode, cachedAudio) =>
               speak(text, langCode, {
                 speed: settings.voiceSpeed,
@@ -1037,7 +1132,7 @@ export default function App() {
               {/* Center Continuous / Proximity Mode */}
               <div className="flex flex-col items-center">
                 <button
-                  onClick={() => setIsContinuous((prev) => !prev)}
+                  onClick={() => handleToggleContinuous()}
                   className={`p-3 rounded-full border transition ${
                     isContinuous
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm'
@@ -1110,9 +1205,18 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
-        onUpdateSettings={(newSettings) =>
-          setSettings((prev) => ({ ...prev, ...newSettings }))
-        }
+        onUpdateSettings={(newSettings) => {
+          setSettings((prev) => {
+            const updated = { ...prev, ...newSettings };
+            try {
+              localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+          if (typeof newSettings.continuousListen === 'boolean') {
+            setIsContinuous(newSettings.continuousListen);
+          }
+        }}
         onClearHistory={() => setTurns([])}
         historyCount={turns.length}
         onOpenInstructions={() => setIsInstructionsOpen(true)}
@@ -1125,11 +1229,16 @@ export default function App() {
         visitorStats={visitorStats}
       />
 
-      <AudioDiagnosticModal
-        isOpen={isAudioDiagnosticOpen}
-        onClose={() => setIsAudioDiagnosticOpen(false)}
-        initialNoiseFilter={settings.noiseFilter !== false}
-      />
+      <ErrorBoundary
+        fallbackTitle="Diagnóstico de Micrófono"
+        onReset={() => setIsAudioDiagnosticOpen(false)}
+      >
+        <AudioDiagnosticModal
+          isOpen={isAudioDiagnosticOpen}
+          onClose={() => setIsAudioDiagnosticOpen(false)}
+          initialNoiseFilter={settings.noiseFilter !== false}
+        />
+      </ErrorBoundary>
 
       <FeedbackModal
         isOpen={isFeedbackOpen}

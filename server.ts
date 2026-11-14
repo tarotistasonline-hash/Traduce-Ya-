@@ -109,9 +109,9 @@ Respond ONLY with valid JSON in this schema:
         },
       });
     } catch (primaryErr: any) {
-      console.warn('gemini-3.1-flash-lite translate fallback to gemini-1.5-flash:', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite translate fallback to gemini-4-hydrogen:', primaryErr?.message || primaryErr);
       response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -308,12 +308,12 @@ Respond strictly with a JSON object:
       });
     } catch (primaryErr: any) {
       lastError = primaryErr;
-      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-1.5-flash):', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen):', primaryErr?.message || primaryErr);
 
-      // 2. Fallback: Direct multimodal translation with gemini-1.5-flash
+      // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-1.5-flash',
+          model: 'gemini-4-hydrogen',
           contents: {
             parts: [audioPart, { text: promptText }],
           },
@@ -323,7 +323,23 @@ Respond strictly with a JSON object:
         });
       } catch (liteErr: any) {
         lastError = liteErr;
-        console.error('All audio translation models failed:', liteErr?.message || liteErr);
+        console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
+
+        // 3. Fallback: Audio transcription with gemini-3.5-transcribe
+        try {
+          response = await ai.models.generateContent({
+            model: 'gemini-3.5-transcribe',
+            contents: {
+              parts: [audioPart, { text: promptText }],
+            },
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+        } catch (transcribeErr: any) {
+          lastError = transcribeErr;
+          console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
+        }
       }
     }
 

@@ -81,6 +81,7 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
 
   // Active tab inside the diagnostic modal
   const [activeTab, setActiveTab] = useState<'live' | 'test' | 'troubleshoot'>('live');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // References for Web Audio & canvas
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -92,6 +93,7 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const speechRecRef = useRef<any>(null);
+  const testIntervalRef = useRef<any>(null);
 
   // Tracking metrics during a test run
   const testMetricsRef = useRef<{
@@ -149,6 +151,10 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
 
   // Clean up streams & audio contexts
   const cleanupStream = useCallback(() => {
+    if (testIntervalRef.current) {
+      clearInterval(testIntervalRef.current);
+      testIntervalRef.current = null;
+    }
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -173,7 +179,13 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
       } catch {}
       speechRecRef.current = null;
     }
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current = null;
+      setIsPlayingRecording(false);
+    }
     setIsLiveMonitoring(false);
+    setIsTesting(false);
     setCurrentDbfs(-60);
     setIsCurrentlyClipping(false);
     setIsCurrentlySilent(false);
@@ -227,146 +239,155 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
       const timeData = new Float32Array(analyser.fftSize);
       let consecutiveSilenceCount = 0;
       let clipDecay = 0;
+      let lastUiUpdateTime = 0;
 
       setIsLiveMonitoring(true);
 
       const render = () => {
         if (!analyserRef.current) return;
-        analyserRef.current.getFloatTimeDomainData(timeData);
 
-        // Calculate RMS and Peak
-        let sumSquares = 0;
-        let peak = 0;
-        let isClippedSample = false;
+        try {
+          analyserRef.current.getFloatTimeDomainData(timeData);
 
-        for (let i = 0; i < timeData.length; i++) {
-          const val = timeData[i];
-          const absVal = Math.abs(val);
-          sumSquares += val * val;
-          if (absVal > peak) peak = absVal;
+          // Calculate RMS and Peak
+          let sumSquares = 0;
+          let peak = 0;
+          let isClippedSample = false;
 
-          // Clipping threshold: amplitude >= 0.985 is hard-clipping
-          if (absVal >= 0.985) {
-            isClippedSample = true;
-          }
-        }
+          for (let i = 0; i < timeData.length; i++) {
+            const val = timeData[i];
+            const absVal = Math.abs(val);
+            sumSquares += val * val;
+            if (absVal > peak) peak = absVal;
 
-        const rms = Math.sqrt(sumSquares / timeData.length);
-        // dBFS formula: 20 * log10(rms). Absolute silence is -Infinity -> clamped to -60 dBFS
-        const dbfs = rms > 0.0001 ? Math.max(-60, Math.min(0, 20 * Math.log10(rms))) : -60;
-        const peakDbfsCalc = peak > 0.0001 ? Math.max(-60, Math.min(0, 20 * Math.log10(peak))) : -60;
-
-        setCurrentDbfs(Math.round(dbfs));
-        setPeakDbfs((prev) => Math.max(prev, Math.round(peakDbfsCalc)));
-
-        // Silence detection: below -48 dBFS or RMS < 0.008 for consecutive frames
-        if (dbfs < -48 || rms < 0.008) {
-          consecutiveSilenceCount++;
-          if (consecutiveSilenceCount > 30) {
-            setIsCurrentlySilent(true);
-            setSilenceDurationMs((prev) => prev + 16);
-          }
-        } else {
-          consecutiveSilenceCount = 0;
-          setIsCurrentlySilent(false);
-        }
-
-        // Clipping detection
-        if (isClippedSample || peakDbfsCalc > -0.15) {
-          clipDecay = 15; // hold for ~250ms for visual alert
-          setIsCurrentlyClipping(true);
-          setClippingEventsCount((prev) => prev + 1);
-
-          if (testMetricsRef.current) {
-            testMetricsRef.current.clippedSamples++;
-            testMetricsRef.current.clippingEvents++;
-          }
-        } else if (clipDecay > 0) {
-          clipDecay--;
-        } else {
-          setIsCurrentlyClipping(false);
-        }
-
-        // Update metrics during 5-second test
-        if (testMetricsRef.current.startTime > 0) {
-          testMetricsRef.current.totalSamples++;
-          testMetricsRef.current.sumLinear += rms;
-          if (peak > testMetricsRef.current.peakLinear) {
-            testMetricsRef.current.peakLinear = peak;
-          }
-          if (dbfs < -48 || rms < 0.008) {
-            testMetricsRef.current.silentSamples++;
-          }
-        }
-
-        // Draw Oscilloscope Waveform on Canvas
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            const width = canvas.width;
-            const height = canvas.height;
-
-            ctx.clearRect(0, 0, width, height);
-
-            // Subtle background grid
-            ctx.strokeStyle = '#1e293b';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(0, height / 2);
-            ctx.lineTo(width, height / 2);
-            ctx.moveTo(0, height / 4);
-            ctx.lineTo(width, height / 4);
-            ctx.moveTo(0, (height * 3) / 4);
-            ctx.lineTo(width, (height * 3) / 4);
-            ctx.stroke();
-
-            // Threshold clipping dashed lines at +/- 98%
-            ctx.strokeStyle = '#ef444433';
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(0, 4);
-            ctx.lineTo(width, 4);
-            ctx.moveTo(0, height - 4);
-            ctx.lineTo(width, height - 4);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Draw wave
-            ctx.lineWidth = 2.5;
-            if (isClippedSample || clipDecay > 0) {
-              ctx.strokeStyle = '#f43f5e'; // Rose/Red on clipping
-              ctx.shadowColor = '#f43f5e';
-              ctx.shadowBlur = 8;
-            } else if (dbfs < -48) {
-              ctx.strokeStyle = '#64748b'; // Slate on silence
-              ctx.shadowBlur = 0;
-            } else {
-              ctx.strokeStyle = '#22d3ee'; // Cyan normal
-              ctx.shadowColor = '#06b6d4';
-              ctx.shadowBlur = 4;
+            // Clipping threshold: amplitude >= 0.985 is hard-clipping
+            if (absVal >= 0.985) {
+              isClippedSample = true;
             }
+          }
 
-            ctx.beginPath();
-            const sliceWidth = width / timeData.length;
-            let x = 0;
+          const rms = Math.sqrt(sumSquares / timeData.length);
+          // dBFS formula: 20 * log10(rms). Clamped to -60 dBFS
+          const dbfs = rms > 0.0001 ? Math.max(-60, Math.min(0, 20 * Math.log10(rms))) : -60;
+          const peakDbfsCalc = peak > 0.0001 ? Math.max(-60, Math.min(0, 20 * Math.log10(peak))) : -60;
 
-            for (let i = 0; i < timeData.length; i++) {
-              const v = timeData[i];
-              // Map from [-1.0, 1.0] to [height, 0]
-              const y = ((1 - v) / 2) * height;
+          // Throttle React state updates to ~10 Hz (every 90ms) to avoid React render depth and loop errors
+          const now = performance.now();
+          if (now - lastUiUpdateTime > 90) {
+            lastUiUpdateTime = now;
+            setCurrentDbfs(Math.round(dbfs));
+            setPeakDbfs((prev) => Math.max(prev, Math.round(peakDbfsCalc)));
 
-              if (i === 0) {
-                ctx.moveTo(x, y);
-              } else {
-                ctx.lineTo(x, y);
+            // Silence detection: below -48 dBFS or RMS < 0.008 for consecutive frames
+            if (dbfs < -48 || rms < 0.008) {
+              consecutiveSilenceCount++;
+              if (consecutiveSilenceCount > 3) {
+                setIsCurrentlySilent(true);
+                setSilenceDurationMs((prev) => prev + 100);
               }
-              x += sliceWidth;
+            } else {
+              consecutiveSilenceCount = 0;
+              setIsCurrentlySilent(false);
             }
 
-            ctx.stroke();
-            ctx.shadowBlur = 0;
+            // Clipping detection
+            if (isClippedSample || peakDbfsCalc > -0.15) {
+              clipDecay = 3;
+              setIsCurrentlyClipping(true);
+              setClippingEventsCount((prev) => prev + 1);
+            } else if (clipDecay > 0) {
+              clipDecay--;
+            } else {
+              setIsCurrentlyClipping(false);
+            }
           }
+
+          // Update metrics during 5-second test (numeric ref, zero React re-render overhead)
+          if (testMetricsRef.current && testMetricsRef.current.startTime > 0) {
+            testMetricsRef.current.totalSamples++;
+            testMetricsRef.current.sumLinear += rms;
+            if (peak > testMetricsRef.current.peakLinear) {
+              testMetricsRef.current.peakLinear = peak;
+            }
+            if (dbfs < -48 || rms < 0.008) {
+              testMetricsRef.current.silentSamples++;
+            }
+            if (isClippedSample || peakDbfsCalc > -0.15) {
+              testMetricsRef.current.clippedSamples++;
+              testMetricsRef.current.clippingEvents++;
+            }
+          }
+
+          // Draw Oscilloscope Waveform on Canvas safely
+          const canvas = canvasRef.current;
+          if (canvas && canvas.width > 0 && canvas.height > 0) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              const width = canvas.width;
+              const height = canvas.height;
+
+              ctx.clearRect(0, 0, width, height);
+
+              // Background grid
+              ctx.strokeStyle = '#1e293b';
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(0, height / 2);
+              ctx.lineTo(width, height / 2);
+              ctx.moveTo(0, height / 4);
+              ctx.lineTo(width, height / 4);
+              ctx.moveTo(0, (height * 3) / 4);
+              ctx.lineTo(width, (height * 3) / 4);
+              ctx.stroke();
+
+              // Threshold clipping dashed lines at +/- 98%
+              ctx.strokeStyle = '#ef444433';
+              ctx.setLineDash([4, 4]);
+              ctx.beginPath();
+              ctx.moveTo(0, 4);
+              ctx.lineTo(width, 4);
+              ctx.moveTo(0, height - 4);
+              ctx.lineTo(width, height - 4);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Draw wave
+              ctx.lineWidth = 2.5;
+              if (isClippedSample || clipDecay > 0) {
+                ctx.strokeStyle = '#f43f5e';
+                ctx.shadowColor = '#f43f5e';
+                ctx.shadowBlur = 8;
+              } else if (dbfs < -48) {
+                ctx.strokeStyle = '#64748b';
+                ctx.shadowBlur = 0;
+              } else {
+                ctx.strokeStyle = '#22d3ee';
+                ctx.shadowColor = '#06b6d4';
+                ctx.shadowBlur = 4;
+              }
+
+              ctx.beginPath();
+              const sliceWidth = width / timeData.length;
+              let x = 0;
+
+              for (let i = 0; i < timeData.length; i++) {
+                const v = timeData[i];
+                const y = ((1 - v) / 2) * height;
+
+                if (i === 0) {
+                  ctx.moveTo(x, y);
+                } else {
+                  ctx.lineTo(x, y);
+                }
+                x += sliceWidth;
+              }
+
+              ctx.stroke();
+              ctx.shadowBlur = 0;
+            }
+          }
+        } catch (canvasErr) {
+          console.warn('Canvas render error suppressed:', canvasErr);
         }
 
         animFrameRef.current = requestAnimationFrame(render);
@@ -377,6 +398,10 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
       console.warn('Microphone live stream init failed:', err);
       setIsLiveMonitoring(false);
       setPermissionState('denied');
+      setErrorMessage(
+        err?.message ||
+          'No se pudo acceder al micrófono. Por favor permite el acceso en el navegador.'
+      );
     }
   }, [cleanupStream, noiseFilterEnabled, selectedDeviceId]);
 
@@ -404,6 +429,7 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
   // Run Guided 5-Second Test
   const handleStart5SecondTest = async () => {
     if (isTesting) return;
+    setErrorMessage(null);
 
     // Reset test metrics
     setTestReport(null);
@@ -414,6 +440,12 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
     }
     recordedChunksRef.current = [];
 
+    // Clear existing timer if any
+    if (testIntervalRef.current) {
+      clearInterval(testIntervalRef.current);
+      testIntervalRef.current = null;
+    }
+
     // Ensure live stream is ready
     if (!mediaStreamRef.current) {
       await startLiveInspection();
@@ -421,7 +453,17 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
 
     const stream = mediaStreamRef.current;
     if (!stream) {
-      alert('No se pudo acceder al micrófono para iniciar la prueba.');
+      setErrorMessage(
+        'No se pudo acceder al micrófono para iniciar la prueba. Por favor verifica los permisos en tu navegador.'
+      );
+      return;
+    }
+
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack || audioTrack.readyState !== 'live' || !audioTrack.enabled) {
+      setErrorMessage(
+        'El micrófono está inactivo o desconectado por el sistema. Por favor reintenta o cambia de micrófono.'
+      );
       return;
     }
 
@@ -445,6 +487,8 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
       if (typeof MediaRecorder !== 'undefined') {
         if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
           mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
         } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
           mimeType = 'audio/mp4';
         }
@@ -483,6 +527,9 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
           }
           setTestSpeechTranscript(trans.trim());
         };
+        recognition.onerror = (err: any) => {
+          console.warn('SpeechRecognition during test notice:', err);
+        };
         speechRecRef.current = recognition;
         recognition.start();
       } catch (recErr) {
@@ -490,13 +537,16 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
       }
     }
 
-    // Run countdown
+    // Run countdown safely with tracked ref
     let remaining = 5;
-    const interval = setInterval(() => {
+    testIntervalRef.current = setInterval(() => {
       remaining -= 1;
       setTestCountdown(remaining);
       if (remaining <= 0) {
-        clearInterval(interval);
+        if (testIntervalRef.current) {
+          clearInterval(testIntervalRef.current);
+          testIntervalRef.current = null;
+        }
         finish5SecondTest();
       }
     }, 1000);
@@ -725,6 +775,24 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
 
         {/* Modal Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="p-1 hover:bg-rose-900/50 rounded text-rose-400 hover:text-rose-100"
+                title="Cerrar aviso"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Hardware & Stream Device Bar */}
           <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 flex-1 min-w-0">

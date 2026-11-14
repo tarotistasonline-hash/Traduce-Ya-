@@ -28,11 +28,11 @@ import {
   AudioLines,
   Gift,
   Zap,
+  Radio,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
 import { isCreatorUser, setCreatorUser, DAILY_FREE_LIMIT } from '../utils/licenseManager';
-import { AudioDiagnosticModal } from './AudioDiagnosticModal';
 import { getApiEndpoint } from '../utils/apiConfig';
 
 interface SettingsModalProps {
@@ -74,7 +74,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [isCreator, setIsCreator] = useState(isCreatorUser);
   const [isTestingApi, setIsTestingApi] = useState(false);
-  const [isAudioDiagnosticOpen, setIsAudioDiagnosticOpen] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [testApiResult, setTestApiResult] = useState<{
     ok: boolean;
     message: string;
@@ -165,9 +165,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               type="button"
               onClick={() => {
                 if (onOpenAudioDiagnostic) {
+                  onClose();
                   onOpenAudioDiagnostic();
-                } else {
-                  setIsAudioDiagnosticOpen(true);
                 }
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition group"
@@ -404,6 +403,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
+          {/* Recordar Modo Mesa Manos Libres */}
+          <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50">
+            <div className="space-y-0.5 pr-2">
+              <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                <Radio className="w-4 h-4 text-emerald-400" />
+                <span>Recordar Modo Mesa Manos Libres</span>
+                {settings.continuousListen && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">
+                    Activo
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-slate-400 leading-relaxed">
+                Mantiene activada la escucha continua al abrir la app. Coloca el móvil en la mesa y conversa fluidamente sin tocar botones en cada turno.
+              </div>
+            </div>
+            <button
+              onClick={() => onUpdateSettings({ continuousListen: !settings.continuousListen })}
+              className={`w-12 h-6 flex items-center rounded-full p-1 transition duration-300 shrink-0 ${
+                settings.continuousListen ? 'bg-emerald-500 justify-end' : 'bg-slate-700 justify-start'
+              }`}
+              title="Recordar y activar Modo Mesa Manos Libres"
+            >
+              <div className="bg-white w-4 h-4 rounded-full shadow-md transform transition" />
+            </button>
+          </div>
+
           {/* Voice Speed */}
           <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-2">
             <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
@@ -566,19 +592,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Clear history */}
           <div className="pt-2">
-            <button
-              onClick={() => {
-                if (window.confirm('¿Deseas borrar todo el historial de la conversación actual?')) {
-                  onClearHistory();
-                  onClose();
-                }
-              }}
-              disabled={historyCount === 0}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-semibold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Limpiar historial ({historyCount} turnos)</span>
-            </button>
+            {showClearConfirm ? (
+              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 space-y-2">
+                <p className="text-xs text-rose-200 font-semibold text-center">
+                  ¿Borrar todo el historial de la conversación actual?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearHistory();
+                      setShowClearConfirm(false);
+                      onClose();
+                    }}
+                    className="flex-1 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition"
+                  >
+                    Sí, borrar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowClearConfirm(false)}
+                    className="flex-1 py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(true)}
+                disabled={historyCount === 0}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-semibold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Limpiar historial ({historyCount} turnos)</span>
+              </button>
+            )}
           </div>
 
           {/* Privacy and Play Store Compliance */}
@@ -595,13 +645,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Herramienta de Diagnóstico de Calidad de Audio y Micrófono */}
-      <AudioDiagnosticModal
-        isOpen={isAudioDiagnosticOpen}
-        onClose={() => setIsAudioDiagnosticOpen(false)}
-        initialNoiseFilter={settings.noiseFilter !== false}
-      />
     </div>
   );
 };
