@@ -102,17 +102,16 @@ Respond ONLY with valid JSON in this schema:
     let response;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.1-flash-lite',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
     } catch (primaryErr: any) {
-      console.warn('gemini-4-hydrogen translate fallback to gemini-3.1-flash-lite:', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite translate fallback to gemini-1.5-flash:', primaryErr?.message || primaryErr);
       response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-1.5-flash',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -296,26 +295,25 @@ Respond strictly with a JSON object:
     let response: any = null;
     let lastError: any = null;
 
-    // 1. Primary: Direct multimodal translation with gemini-4-hydrogen
+    // 1. Primary: Direct multimodal translation with gemini-3.1-flash-lite
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.1-flash-lite',
         contents: {
           parts: [audioPart, { text: promptText }],
         },
         config: {
           responseMimeType: 'application/json',
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
     } catch (primaryErr: any) {
       lastError = primaryErr;
-      console.warn('gemini-4-hydrogen audio notice (trying gemini-3.1-flash-lite):', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-1.5-flash):', primaryErr?.message || primaryErr);
 
-      // 2. Fallback: Direct multimodal translation with gemini-3.1-flash-lite
+      // 2. Fallback: Direct multimodal translation with gemini-1.5-flash
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-1.5-flash',
           contents: {
             parts: [audioPart, { text: promptText }],
           },
@@ -325,35 +323,7 @@ Respond strictly with a JSON object:
         });
       } catch (liteErr: any) {
         lastError = liteErr;
-        console.warn('gemini-3.1-flash-lite audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
-
-        // 3. Last resort: Transcribe with gemini-3.5-transcribe + translate with gemini-4-hydrogen / gemini-3.1-flash-lite
-        try {
-          const transcribeRes = await ai.models.generateContent({
-            model: 'gemini-3.5-transcribe',
-            contents: { parts: [audioPart, { text: 'Transcribe this speech verbatim.' }] },
-          });
-          const transcribed = (transcribeRes.text || '').trim();
-          if (transcribed) {
-            const transRes = await ai.models.generateContent({
-              model: 'gemini-3.1-flash-lite',
-              contents: `Translate this transcribed speech: "${transcribed}". Target language: ${toLang || 'Spanish'}. Return JSON: {"transcribedText":"${transcribed.replace(/"/g, '\\"')}","detectedLanguage":"${fromLang || 'Auto-detect'}","translatedText":"...","phonetic":""}`,
-              config: { responseMimeType: 'application/json' },
-            });
-            response = transRes;
-          } else {
-            return res.status(200).json({
-              transcribedText: '',
-              detectedLanguage: fromLang,
-              translatedText: '',
-              phonetic: '',
-              noSpeech: true,
-            });
-          }
-        } catch (transcribeErr: any) {
-          lastError = transcribeErr;
-          console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
-        }
+        console.error('All audio translation models failed:', liteErr?.message || liteErr);
       }
     }
 
@@ -497,10 +467,8 @@ app.post('/api/tts', async (req, res) => {
       mimeType: 'audio/wav',
     });
   } catch (error: any) {
-    console.error('TTS error:', error);
-    return res.status(500).json({
-      error: error.message || 'Error al generar voz sintetizada.',
-    });
+    console.warn('TTS error (falling back to browser speech synthesis):', error?.message || error);
+    return res.json({ audioBase64: null });
   }
 });
 
