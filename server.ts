@@ -13,17 +13,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-// Enable CORS so custom domains (e.g. traduce-ya.online) can reach /api/* cleanly
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
 app.use(express.json({ limit: '25mb' }));
 
 // Stats file path on persistent filesystem
@@ -305,7 +294,6 @@ Respond strictly with a JSON object:
 
     let response: any = null;
     let lastError: any = null;
-    let usedTranscribeOnly = false;
 
     // 1. Primary: Direct multimodal translation with gemini-3.1-flash-lite
     try {
@@ -337,15 +325,17 @@ Respond strictly with a JSON object:
         lastError = liteErr;
         console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
 
-        // 3. Fallback: Audio transcription with gemini-3.5-transcribe (plain text response)
+        // 3. Fallback: Audio transcription with gemini-3.5-transcribe
         try {
           response = await ai.models.generateContent({
             model: 'gemini-3.5-transcribe',
             contents: {
-              parts: [audioPart, { text: 'Transcribe verbatim the spoken words in this audio. If there is no intelligible speech, return empty string.' }],
+              parts: [audioPart, { text: promptText }],
+            },
+            config: {
+              responseMimeType: 'application/json',
             },
           });
-          usedTranscribeOnly = true;
         } catch (transcribeErr: any) {
           lastError = transcribeErr;
           console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
@@ -363,27 +353,17 @@ Respond strictly with a JSON object:
 
     const rawText = response.text ? response.text : '{}';
     let data: any = {};
-    if (usedTranscribeOnly) {
-      const transcript = rawText.trim();
+    try {
+      const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const match = clean.match(/\{[\s\S]*\}/);
+      data = JSON.parse(match ? match[0] : clean);
+    } catch {
       data = {
-        transcribedText: transcript,
+        transcribedText: 'Voz detectada',
         detectedLanguage: fromLang,
-        translatedText: '',
+        translatedText: rawText.replace(/```[a-z]*/g, '').trim(),
         phonetic: '',
       };
-    } else {
-      try {
-        const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const match = clean.match(/\{[\s\S]*\}/);
-        data = JSON.parse(match ? match[0] : clean);
-      } catch {
-        data = {
-          transcribedText: 'Voz detectada',
-          detectedLanguage: fromLang,
-          translatedText: rawText.replace(/```[a-z]*/g, '').trim(),
-          phonetic: '',
-        };
-      }
     }
 
     if (!data.transcribedText && !data.translatedText) {
@@ -422,7 +402,7 @@ Respond strictly with a JSON object:
   }
 });
 
-// Text-to-Speech Endpoint using Gemini 3.8 Flash Lite TTS
+// Text-to-Speech Endpoint using browser synthesis fallback or Gemini TTS if supported
 app.post('/api/tts', async (req, res) => {
   try {
     const { text, voiceName = 'Kore' } = req.body;
@@ -433,122 +413,43 @@ app.post('/api/tts', async (req, res) => {
 
     const ai = getAiClient();
     if (!ai) {
-      return res.status(503).json({ error: 'Servicio de voz no disponible. Configure GEMINI_API_KEY.' });
+      return res.json({ audioBase64: null });
     }
 
-    // Supported prebuilt voices: 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
     const allowedVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
     const chosenVoice = allowedVoices.includes(voiceName) ? voiceName : 'Kore';
 
-    let response;
     try {
-      response = await ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash-lite-tts',
         contents: [
           {
             role: 'user',
-            parts: [
-              {
-                text: text.slice(0, 500), // safe limit for spoken phrase
-                speechMetadata: {
-                  style: 'Natural, friendly conversational speech',
-                },
-              },
-            ],
+            parts: [{ text: text.slice(0, 500) }],
           },
         ],
         config: {
           responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: chosenVoice },
-            },
-          },
         },
       });
-    } catch (modelError: any) {
-      // If error was related to speechMetadata, retry with plain text parts
-      if (modelError?.message && modelError.message.includes('speechMetadata')) {
-        response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: text.slice(0, 500) }],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: chosenVoice },
-              },
-            },
-          },
+
+      const base64Audio =
+        response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+      if (base64Audio) {
+        return res.json({
+          audioBase64: base64Audio,
+          mimeType: 'audio/wav',
         });
-      } else {
-        throw modelError;
       }
+    } catch {
+      // Fallback silently to browser speech synthesis
     }
 
-    const base64Audio =
-      response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-    if (!base64Audio) {
-      return res.status(500).json({ error: 'No se generó audio.' });
-    }
-
-    return res.json({
-      audioBase64: base64Audio,
-      mimeType: 'audio/wav',
-    });
-  } catch (error: any) {
-    console.warn('TTS error (falling back to browser speech synthesis):', error?.message || error);
+    return res.json({ audioBase64: null });
+  } catch {
     return res.json({ audioBase64: null });
   }
-});
-
-// Feedback inbox endpoints
-const FEEDBACK_FILE = path.join(__dirname, 'feedback_messages.json');
-
-function loadFeedbackItems(): any[] {
-  try {
-    if (fs.existsSync(FEEDBACK_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8'));
-      return Array.isArray(parsed) ? parsed : [];
-    }
-  } catch (err) {
-    console.warn('Could not read feedback_messages.json:', err);
-  }
-  return [];
-}
-
-app.get('/api/feedback', (req, res) => {
-  return res.json({ items: loadFeedbackItems() });
-});
-
-app.post('/api/feedback', (req, res) => {
-  const { type = 'issue', message, contact, activeLanguagePair, deviceInfo, timestamp } = req.body || {};
-  if (!message || typeof message !== 'string' || !message.trim()) {
-    return res.status(400).json({ error: 'El mensaje es obligatorio.' });
-  }
-  const items = loadFeedbackItems();
-  const newItem = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    type,
-    message: message.trim().slice(0, 2000),
-    contact: contact ? String(contact).trim().slice(0, 200) : undefined,
-    activeLanguagePair,
-    deviceInfo: deviceInfo ? String(deviceInfo).slice(0, 200) : undefined,
-    timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
-  };
-  items.unshift(newItem);
-  try {
-    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items.slice(0, 200), null, 2), 'utf8');
-  } catch (err) {
-    console.warn('Could not persist feedback_messages.json:', err);
-  }
-  return res.json({ ok: true, item: newItem });
 });
 
 async function startServer() {
