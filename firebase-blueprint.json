@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "VisitorStats": {
+      "title": "VisitorStats",
+      "description": "Global persistent visitor counter metrics across all deployments and custom domains",
+      "type": "object",
+      "properties": {
+        "totalVisits": {
+          "type": "integer",
+          "description": "Total cumulative visits recorded"
+        },
+        "todayVisits": {
+          "type": "integer",
+          "description": "Total visits recorded for the current date"
+        },
+        "uniqueVisitors": {
+          "type": "integer",
+          "description": "Total unique browser visitors recorded"
+        },
+        "today": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Date string in YYYY-MM-DD format"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last atomic counter update"
+        }
+      },
+      "required": [
+        "totalVisits",
+        "todayVisits",
+        "uniqueVisitors",
+        "today",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/stats/{statsId}": {
+      "schema": "VisitorStats",
+      "description": "Singleton global visitor statistics document at /stats/global"
+    }
+  }
+}

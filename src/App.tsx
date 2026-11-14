@@ -29,7 +29,7 @@ import {
   Activity,
   Gift,
 } from 'lucide-react';
-import { fetchAndRecordVisit, getCachedVisitorStats, VisitorStats } from './services/visitorService';
+import { fetchAndRecordVisit, getCachedVisitorStats, subscribeVisitorStats, VisitorStats } from './services/visitorService';
 
 import {
   Language,
@@ -177,9 +177,21 @@ export default function App() {
   const [visitorStats, setVisitorStats] = useState<VisitorStats>(() => getCachedVisitorStats());
 
   useEffect(() => {
-    fetchAndRecordVisit().then((stats) => {
-      setVisitorStats(stats);
+    let active = true;
+    fetchAndRecordVisit()
+      .then((stats) => {
+        if (active) setVisitorStats(stats);
+      })
+      .catch((err) => console.warn('Visitor stats init notice:', err));
+
+    const unsubscribe = subscribeVisitorStats((liveStats) => {
+      if (active) setVisitorStats(liveStats);
     });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   // Save history
@@ -741,7 +753,7 @@ export default function App() {
 
         {/* Secondary Utility Strip: Horizontally scrollable on small screens so no tool is ever hidden */}
         <div className="px-3 sm:px-5 pb-2 flex items-center gap-1.5 overflow-x-auto border-t border-slate-800/60 pt-1.5">
-          {/* Quick Toggle for Modo Mesa / Manos Libres with Reminder Badge */}
+          {/* Quick Toggle for Modo Mesa / Manos Libres */}
           <button
             onClick={() => handleToggleContinuous()}
             className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 active:scale-95 ${
@@ -749,10 +761,10 @@ export default function App() {
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
                 : 'bg-emerald-950/40 hover:bg-emerald-900/40 border-emerald-500/40 text-emerald-300 shadow-sm'
             }`}
-            title="Recordatorio: Activar o desactivar Modo Mesa Manos Libres"
+            title="Activar o desactivar Modo Mesa / Manos Libres"
           >
             <Radio className={`w-3.5 h-3.5 ${isContinuous ? 'text-emerald-400 animate-pulse' : 'text-emerald-400'}`} />
-            <span>{isContinuous ? 'Mesa Manos Libres: ON' : '💡 Activar Modo Mesa'}</span>
+            <span>{isContinuous ? 'Modo Mesa / Manos Libres: ON' : 'Activar Modo Mesa / Manos Libres'}</span>
           </button>
 
           {/* Quick 1-Tap Audio Diagnostic */}
