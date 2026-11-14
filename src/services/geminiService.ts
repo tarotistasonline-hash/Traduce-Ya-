@@ -17,6 +17,26 @@ export interface AudioTranslateResponse {
   noSpeech?: boolean;
 }
 
+function isNetworkFetchError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return (
+    msg.includes('Failed to fetch') ||
+    msg.includes('Load failed') ||
+    msg.includes('NetworkError') ||
+    msg.includes('fetch')
+  );
+}
+
+async function parseJsonSafely(res: Response): Promise<any> {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      'El servidor de traducción devolvió una respuesta no válida (verifica si la sesión expiró o si el dominio tiene acceso al backend /api).'
+    );
+  }
+  return res.json();
+}
+
 export async function translateText(
   text: string,
   fromLang: string,
@@ -24,42 +44,37 @@ export async function translateText(
   tone: string = 'natural'
 ): Promise<TranslateResponse> {
   const url = getApiEndpoint('/api/translate');
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, fromLang, toLang, tone }),
-    });
+  const requestBody = JSON.stringify({ text, fromLang, toLang, tone });
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `Error ${res.status}`);
-    }
-
-    return await res.json();
-  } catch (err: any) {
-    console.warn('Translate failed, trying one retry:', err);
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await new Promise((r) => setTimeout(r, 400));
-      const retryRes = await fetch('/api/translate', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, fromLang, toLang, tone }),
+        body: requestBody,
       });
-      if (retryRes.ok) {
-        return await retryRes.json();
-      }
-      const retryErr = await retryRes.json().catch(() => ({}));
-      if (retryErr?.error) {
-        throw new Error(retryErr.error);
-      }
-    } catch (retryErr: any) {
-      console.warn('Retry also failed:', retryErr);
-      throw retryErr;
-    }
 
-    throw err;
+      const data = await parseJsonSafely(res);
+      if (!res.ok) {
+        throw new Error(data?.error || `Error ${res.status} del servidor.`);
+      }
+      return data;
+    } catch (err: any) {
+      console.warn(`Translate attempt ${attempt + 1} notice:`, err);
+      if (attempt === 0 && isNetworkFetchError(err)) {
+        await new Promise((r) => setTimeout(r, 450));
+        continue;
+      }
+      if (isNetworkFetchError(err)) {
+        throw new Error(
+          'No se pudo conectar con el servidor de traducción. Verifica tu conexión de internet o recarga la página.'
+        );
+      }
+      throw err;
+    }
   }
+
+  throw new Error('No se pudo conectar con el servidor de traducción.');
 }
 
 export async function translateAudioBlob(
@@ -103,63 +118,44 @@ export async function translateAudioBlob(
     throw new Error('No se pudo procesar el archivo de audio local.');
   }
 
-  const primaryUrl = getApiEndpoint('/api/translate-audio');
-  const payload = {
+  const url = getApiEndpoint('/api/translate-audio');
+  const payload = JSON.stringify({
     audioBase64,
     mimeType: audioBlob.type || 'audio/webm',
     fromLang,
     toLang,
-  };
+  });
 
   let res: Response | null = null;
-
-  try {
-    console.log('[translateAudioBlob] Sending audio to server:', {
-      url: primaryUrl,
-      blobSize: audioBlob.size,
-      mimeType: audioBlob.type,
-      fromLang,
-      toLang,
-    });
-    res = await fetch(primaryUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (primaryFetchErr: any) {
-    console.warn('[translateAudioBlob] Primary fetch failed, attempting relative fallback (/api/translate-audio):', primaryFetchErr);
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      await new Promise((r) => setTimeout(r, 400));
-      res = await fetch('/api/translate-audio', {
+      res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: payload,
       });
-    } catch (fallbackErr: any) {
-      console.error('[translateAudioBlob] Both endpoints failed to fetch:', fallbackErr);
-      throw new Error('No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.');
+      break;
+    } catch (fetchErr: any) {
+      console.warn(`[translateAudioBlob] Fetch attempt ${attempt + 1} failed:`, fetchErr);
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 450));
+        continue;
+      }
+      throw new Error(
+        'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o recarga la página.'
+      );
     }
   }
 
-  if (!res || !res.ok) {
-    const errorData = await res?.json().catch(() => ({}));
-    const errorMsg = errorData?.error || `Error ${res?.status || 500} al procesar audio en servidor`;
-    console.error('[translateAudioBlob] Server returned error response:', { status: res?.status, errorMsg });
-    throw new Error(errorMsg);
+  if (!res) {
+    throw new Error('No se recibió respuesta del servidor de traducción.');
   }
 
-  let data: any = {};
-  try {
-    data = await res.json();
-    console.log('[translateAudioBlob] Received response from server:', {
-      hasTranscript: Boolean(data.transcribedText),
-      hasTranslation: Boolean(data.translatedText),
-      noSpeech: Boolean(data.noSpeech),
-      detectedLanguage: data.detectedLanguage,
-    });
-  } catch (jsonErr) {
-    console.error('[translateAudioBlob] Failed to parse JSON response:', jsonErr);
-    throw new Error('Respuesta inválida del servidor de traducción.');
+  const data = await parseJsonSafely(res);
+  if (!res.ok) {
+    const errorMsg = data?.error || `Error ${res.status} al procesar audio en servidor`;
+    console.error('[translateAudioBlob] Server returned error response:', { status: res.status, errorMsg });
+    throw new Error(errorMsg);
   }
 
   return {
@@ -184,7 +180,7 @@ export async function generateAiSpeech(
     });
 
     if (!res.ok) return null;
-    const data = await res.json();
+    const data = await parseJsonSafely(res);
     return data.audioBase64 || null;
   } catch (err) {
     console.warn('TTS fetch failed:', err);

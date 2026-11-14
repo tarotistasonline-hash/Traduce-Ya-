@@ -305,6 +305,7 @@ Respond strictly with a JSON object:
 
     let response: any = null;
     let lastError: any = null;
+    let usedTranscribeOnly = false;
 
     // 1. Primary: Direct multimodal translation with gemini-3.1-flash-lite
     try {
@@ -336,17 +337,15 @@ Respond strictly with a JSON object:
         lastError = liteErr;
         console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
 
-        // 3. Fallback: Audio transcription with gemini-3.5-transcribe
+        // 3. Fallback: Audio transcription with gemini-3.5-transcribe (plain text response)
         try {
           response = await ai.models.generateContent({
             model: 'gemini-3.5-transcribe',
             contents: {
-              parts: [audioPart, { text: promptText }],
-            },
-            config: {
-              responseMimeType: 'application/json',
+              parts: [audioPart, { text: 'Transcribe verbatim the spoken words in this audio. If there is no intelligible speech, return empty string.' }],
             },
           });
+          usedTranscribeOnly = true;
         } catch (transcribeErr: any) {
           lastError = transcribeErr;
           console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
@@ -364,17 +363,27 @@ Respond strictly with a JSON object:
 
     const rawText = response.text ? response.text : '{}';
     let data: any = {};
-    try {
-      const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const match = clean.match(/\{[\s\S]*\}/);
-      data = JSON.parse(match ? match[0] : clean);
-    } catch {
+    if (usedTranscribeOnly) {
+      const transcript = rawText.trim();
       data = {
-        transcribedText: 'Voz detectada',
+        transcribedText: transcript,
         detectedLanguage: fromLang,
-        translatedText: rawText.replace(/```[a-z]*/g, '').trim(),
+        translatedText: '',
         phonetic: '',
       };
+    } else {
+      try {
+        const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const match = clean.match(/\{[\s\S]*\}/);
+        data = JSON.parse(match ? match[0] : clean);
+      } catch {
+        data = {
+          transcribedText: 'Voz detectada',
+          detectedLanguage: fromLang,
+          translatedText: rawText.replace(/```[a-z]*/g, '').trim(),
+          phonetic: '',
+        };
+      }
     }
 
     if (!data.transcribedText && !data.translatedText) {
@@ -497,6 +506,49 @@ app.post('/api/tts', async (req, res) => {
     console.warn('TTS error (falling back to browser speech synthesis):', error?.message || error);
     return res.json({ audioBase64: null });
   }
+});
+
+// Feedback inbox endpoints
+const FEEDBACK_FILE = path.join(__dirname, 'feedback_messages.json');
+
+function loadFeedbackItems(): any[] {
+  try {
+    if (fs.existsSync(FEEDBACK_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8'));
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (err) {
+    console.warn('Could not read feedback_messages.json:', err);
+  }
+  return [];
+}
+
+app.get('/api/feedback', (req, res) => {
+  return res.json({ items: loadFeedbackItems() });
+});
+
+app.post('/api/feedback', (req, res) => {
+  const { type = 'issue', message, contact, activeLanguagePair, deviceInfo, timestamp } = req.body || {};
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'El mensaje es obligatorio.' });
+  }
+  const items = loadFeedbackItems();
+  const newItem = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    type,
+    message: message.trim().slice(0, 2000),
+    contact: contact ? String(contact).trim().slice(0, 200) : undefined,
+    activeLanguagePair,
+    deviceInfo: deviceInfo ? String(deviceInfo).slice(0, 200) : undefined,
+    timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+  };
+  items.unshift(newItem);
+  try {
+    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items.slice(0, 200), null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Could not persist feedback_messages.json:', err);
+  }
+  return res.json({ ok: true, item: newItem });
 });
 
 async function startServer() {

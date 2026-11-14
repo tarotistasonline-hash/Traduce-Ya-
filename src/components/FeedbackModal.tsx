@@ -83,18 +83,10 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Error sending feedback:', err);
-      // Fallback: offer direct mailto if offline or server is unreachable
-      const mailtoSubject = encodeURIComponent(`[Buzón Traduce Ya] ${type.toUpperCase()}`);
-      const mailtoBody = encodeURIComponent(`${message}\n\nContacto: ${contact || 'No provisto'}\nIdiomas: ${activeLanguagePair?.from} -> ${activeLanguagePair?.to}`);
-      window.open(`mailto:tarotistasonline@gmail.com?subject=${mailtoSubject}&body=${mailtoBody}`, '_blank');
       setSubmitResult({
-        ok: true,
-        text: 'Se abrió tu cliente de correo para enviar tu mensaje directamente a la administradora.',
+        ok: false,
+        text: 'No se pudo conectar con el buzón en este momento. Puedes escribirnos directamente a tarotistasonline@gmail.com.',
       });
-      setTimeout(() => {
-        onClose();
-        setSubmitResult(null);
-      }, 3000);
     } finally {
       setIsSubmitting(false);
     }

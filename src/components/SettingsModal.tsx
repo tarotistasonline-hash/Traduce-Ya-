@@ -33,7 +33,7 @@ import {
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
 import { isCreatorUser, setCreatorUser, DAILY_FREE_LIMIT } from '../utils/licenseManager';
-import { getApiEndpoint } from '../utils/apiConfig';
+import { translateText } from '../services/geminiService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -84,17 +84,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsTestingApi(true);
     setTestApiResult(null);
     try {
-      const res = await fetch(getApiEndpoint('/api/translate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: 'Hola',
-          fromLang: 'Spanish',
-          toLang: 'English',
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.translatedText) {
+      const data = await translateText('Hola', 'Spanish', 'English');
+      if (data.translatedText) {
         setTestApiResult({
           ok: true,
           message: `¡Traducción exitosa!: "${data.translatedText}" (${data.detectedLanguage || 'Español'})`,
@@ -102,13 +93,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       } else {
         setTestApiResult({
           ok: false,
-          message: data.error || 'Error en la respuesta del servidor.',
+          message: 'Error en la respuesta del servidor.',
         });
       }
     } catch (e: any) {
       setTestApiResult({
         ok: false,
-        message: e.message || 'No se pudo conectar al servidor.',
+        message: e?.message || 'No se pudo conectar al servidor.',
       });
     } finally {
       setIsTestingApi(false);
