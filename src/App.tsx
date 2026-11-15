@@ -389,7 +389,7 @@ export default function App() {
         }
 
         const newTurn: ConversationTurn = {
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           speaker,
           originalText: trimmed,
           translatedText: result.translatedText,
@@ -536,7 +536,7 @@ export default function App() {
         }
 
         const newTurn: ConversationTurn = {
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           speaker,
           originalText: finalTranscribedText || 'Audio recibido',
           translatedText: finalTranslatedText || 'Audio recibido',

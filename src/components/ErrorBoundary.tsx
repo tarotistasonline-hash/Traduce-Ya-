@@ -62,13 +62,20 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {this.state.error?.message && (
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-left">
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold">
-                  Detalle del error:
-                </span>
-                <p className="text-xs text-rose-300 font-mono mt-0.5 break-words">
-                  {this.state.error.message}
-                </p>
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-left space-y-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold">
+                    Detalle del error:
+                  </span>
+                  <p className="text-xs text-rose-300 font-mono mt-0.5 break-words">
+                    {this.state.error.message}
+                  </p>
+                </div>
+                {(this.state.error.message.includes('insertBefore') || this.state.error.message.includes('Node')) && (
+                  <div className="p-2.5 rounded-lg bg-cyan-950/60 border border-cyan-500/30 text-[11px] text-cyan-200 leading-relaxed">
+                    💡 <strong>Consejo para el visitante:</strong> Si tienes activado el traductor automático de Google Chrome o extensiones de traducción en este sitio, te sugerimos desactivarlas. Traduce Ya cuenta con su propio motor de traducción inteligente incorporado.
+                  </div>
+                )}
               </div>
             )}
 
