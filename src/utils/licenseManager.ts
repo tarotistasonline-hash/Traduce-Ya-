@@ -1,6 +1,6 @@
 // License and usage quota manager for Traduce Ya
 
-export const DAILY_FREE_LIMIT = 2;
+export const DAILY_FREE_LIMIT = 15;
 
 const STORAGE_KEY_PRO = 'traductor_ya_pro_v1';
 const STORAGE_KEY_CREATOR = 'traductor_ya_creator_mode_v1';
