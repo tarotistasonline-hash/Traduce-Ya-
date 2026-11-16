@@ -54,6 +54,7 @@ function isQuotaError(err: any): boolean {
 app.get('/api/status', (req, res) => {
   res.json({
     hasApiKey: !!process.env.GEMINI_API_KEY,
+    mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN,
     status: 'ok',
   });
 });
@@ -301,6 +302,155 @@ app.post('/api/feedback', (req, res) => {
   }
 });
 
+// Mercado Pago Operation Verification Endpoint
+const VERIFIED_PAYMENTS_FILE = path.join(__dirname, 'verified_payments.json');
+
+interface VerifiedPaymentRecord {
+  operationId: string;
+  amount?: number;
+  currency?: string;
+  verifiedAt: number;
+  contact?: string;
+}
+
+function readVerifiedPayments(): VerifiedPaymentRecord[] {
+  try {
+    if (fs.existsSync(VERIFIED_PAYMENTS_FILE)) {
+      const raw = fs.readFileSync(VERIFIED_PAYMENTS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (err) {
+    console.warn('Could not read verified_payments.json:', err);
+  }
+  return [];
+}
+
+function writeVerifiedPayments(records: VerifiedPaymentRecord[]) {
+  try {
+    fs.writeFileSync(VERIFIED_PAYMENTS_FILE, JSON.stringify(records.slice(0, 2000), null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Could not write verified_payments.json:', err);
+  }
+}
+
+app.post('/api/verify-mercadopago', async (req, res) => {
+  try {
+    const { operationId, contact } = req.body || {};
+    const cleanId = String(operationId || '').trim().replace(/\D/g, '');
+
+    if (!cleanId || cleanId.length < 6 || cleanId.length > 20) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Ingresa un número de operación válido de Mercado Pago (solo números, ej: 12345678901).',
+      });
+    }
+
+    const cleanContact = typeof contact === 'string' ? contact.trim().slice(0, 200) : '';
+    const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+
+    // If MERCADOPAGO_ACCESS_TOKEN is NOT configured yet, register safely in Buzón for owner review
+    if (!mpToken) {
+      const items = readFeedbackMessages();
+      items.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        type: 'payment',
+        message: `NÚMERO DE OPERACIÓN MERCADO PAGO: ${cleanId}\n(Verificación automática pendiente: configura MERCADOPAGO_ACCESS_TOKEN en el servidor o envía un código al comprador).`,
+        contact: cleanContact || 'Sin contacto informado',
+        timestamp: Date.now(),
+      });
+      writeFeedbackMessages(items);
+
+      return res.status(202).json({
+        ok: true,
+        verified: false,
+        pendingManualReview: true,
+        message: `¡Recibimos tu número de operación (#${cleanId})! En breve confirmaremos el comprobante y te enviaremos tu acceso.`,
+      });
+    }
+
+    // Check if operation ID was already claimed
+    const existingRecords = readVerifiedPayments();
+    if (existingRecords.some((r) => r.operationId === cleanId)) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Este número de operación ya fue utilizado anteriormente para activar un Pase Ilimitado.',
+      });
+    }
+
+    // Verify directly against Mercado Pago Payments API
+    const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(cleanId)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${mpToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!mpResponse.ok) {
+      if (mpResponse.status === 404) {
+        return res.status(404).json({
+          ok: false,
+          error: 'No encontramos ese número de operación en Mercado Pago. Revisa tu comprobante e inténtalo de nuevo.',
+        });
+      }
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudo consultar Mercado Pago en este momento. Intenta nuevamente en unos segundos.',
+      });
+    }
+
+    const paymentData: any = await mpResponse.json();
+    const status = String(paymentData?.status || '').toLowerCase();
+
+    if (status === 'pending' || status === 'in_process' || status === 'authorized') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Tu pago aún figura como pendiente en Mercado Pago. Espera unos segundos a que se acredite y vuelve a intentar.',
+      });
+    }
+
+    if (status !== 'approved') {
+      return res.status(400).json({
+        ok: false,
+        error: `El pago en Mercado Pago figura como "${status || 'no aprobado'}" y no puede activar el Pase Ilimitado.`,
+      });
+    }
+
+    // Approved! Save verified operation ID and record in Buzón
+    existingRecords.unshift({
+      operationId: cleanId,
+      amount: typeof paymentData.transaction_amount === 'number' ? paymentData.transaction_amount : undefined,
+      currency: typeof paymentData.currency_id === 'string' ? paymentData.currency_id : undefined,
+      verifiedAt: Date.now(),
+      contact: cleanContact || undefined,
+    });
+    writeVerifiedPayments(existingRecords);
+
+    const items = readFeedbackMessages();
+    items.unshift({
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      type: 'payment',
+      message: `PAGO APROBADO Y DESBLOQUEADO AUTOMÁTICAMENTE\nOperación Mercado Pago: #${cleanId}\nMonto: ${paymentData.transaction_amount ?? ''} ${paymentData.currency_id ?? ''}`,
+      contact: cleanContact || undefined,
+      timestamp: Date.now(),
+    });
+    writeFeedbackMessages(items);
+
+    return res.json({
+      ok: true,
+      verified: true,
+      message: '¡Pago verificado con Mercado Pago! Tu Pase Ilimitado ha sido activado.',
+    });
+  } catch (err: any) {
+    console.error('Mercado Pago verify error:', err);
+    return res.status(500).json({
+      ok: false,
+      error: 'Ocurrió un error al verificar el pago. Intenta nuevamente.',
+    });
+  }
+});
+
 // Audio Multimodal Direct Translation Endpoint
 app.post('/api/translate-audio', async (req, res) => {
   const { audioBase64, mimeType = 'audio/webm', fromLang, toLang } = req.body || {};
@@ -519,6 +669,77 @@ async function startServer() {
       },
       appType: 'spa',
     });
+
+    // HMR is disabled in this preview environment; serve a clean no-op Vite client shim
+    // so CSS/React transforms work without opening failing WebSocket connections.
+    app.get('/@vite/client', (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.send(`
+const sheetsMap = new Map();
+const linkSheetsMap = new Map();
+if (typeof document !== 'undefined') {
+  document.querySelectorAll('style[data-vite-dev-id]').forEach((el) => {
+    sheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+  document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]').forEach((el) => {
+    linkSheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+}
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  if (linkSheetsMap.has(id)) return;
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement('afterend', style);
+    }
+    lastInsertedStyle = style;
+  } else if (style.textContent !== content) {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  if (linkSheetsMap.has(id)) {
+    document.querySelectorAll(\`link[rel="stylesheet"][data-vite-dev-id="\${CSS.escape(id)}"]\`).forEach((el) => el.remove());
+    linkSheetsMap.delete(id);
+  }
+  const style = sheetsMap.get(id);
+  if (style && style.parentNode) {
+    style.parentNode.removeChild(style);
+  }
+  sheetsMap.delete(id);
+}
+export function createHotContext() {
+  return {
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+    data: {},
+  };
+}
+export function injectQuery(url) {
+  return url;
+}
+const BaseHTMLElement = typeof globalThis.HTMLElement === 'function' ? globalThis.HTMLElement : class {};
+export class ErrorOverlay extends BaseHTMLElement {}
+`);
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');

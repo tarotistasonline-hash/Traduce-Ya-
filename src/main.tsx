@@ -6,10 +6,10 @@ import { registerSW } from 'virtual:pwa-register';
 
 // Register Service Worker for offline capabilities and PWA caching
 if ('serviceWorker' in navigator) {
-  registerSW({
+  const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {
-      console.log('PWA: Actualización disponible.');
+      updateSW(true);
     },
     onOfflineReady() {
       console.log('PWA: Modo sin conexión preparado.');

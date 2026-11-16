@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Share2, PlusSquare, X, Smartphone, Check } from 'lucide-react';
+import { Download, Share2, PlusSquare, X, Smartphone, Check, MoreVertical } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface PWAInstallButtonProps {
@@ -9,9 +9,7 @@ interface PWAInstallButtonProps {
 export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'header' }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
-  const [installedSuccess, setInstalledSuccess] = useState(false);
 
-  // If already running as an installed PWA on standalone screen
   if (isInstalled) {
     if (variant === 'settings') {
       return (
@@ -26,15 +24,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
 
   const handleInstallClick = async () => {
     if (isInstallable) {
-      const success = await install();
-      if (success) {
-        setInstalledSuccess(true);
-        setTimeout(() => setInstalledSuccess(false), 3000);
-      }
-    } else if (isIOS) {
-      setShowIOSGuide(true);
+      await install();
     } else {
-      // General instructions modal if browser doesn't expose beforeinstallprompt yet
       setShowIOSGuide(true);
     }
   };
@@ -43,17 +34,19 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
     <>
       {variant === 'header' && (
         <button
+          type="button"
           onClick={handleInstallClick}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/40 text-cyan-300 text-xs font-semibold shadow-sm transition hover:scale-105 active:scale-95"
+          className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 text-[11px] sm:text-xs font-bold shadow-sm transition active:scale-95 shrink-0"
           title="Instalar aplicación en tu móvil o PC"
         >
-          <Download className="w-3.5 h-3.5 text-cyan-400 animate-bounce" />
-          <span className="hidden sm:inline">Instalar App</span>
+          <Download className="w-3.5 h-3.5 text-cyan-300" />
+          <span>Instalar</span>
         </button>
       )}
 
       {variant === 'settings' && (
         <button
+          type="button"
           onClick={handleInstallClick}
           className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-slate-800 to-cyan-950/40 border border-cyan-500/40 hover:border-cyan-400 text-left transition group shadow-md"
         >
@@ -76,7 +69,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
         </button>
       )}
 
-      {/* Guide Modal for iOS Safari / Unsupported prompt */}
+      {/* Guide Modal for iOS Safari or Android Chrome manual install */}
       {showIOSGuide && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="w-full sm:max-w-md bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl space-y-4 animate-slide-up">
@@ -88,6 +81,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowIOSGuide(false)}
                 className="p-1.5 rounded-full text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition"
               >
@@ -102,10 +96,20 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                 </div>
                 <div>
                   <p className="font-medium text-slate-100">
-                    En Safari o Chrome, pulsa el botón de <strong>Compartir</strong>
+                    {isIOS
+                      ? 'En Safari, pulsa el botón Compartir'
+                      : 'En Chrome (Android/PC), abre el menú o pulsa Compartir'}
                   </p>
                   <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                    <Share2 className="w-3.5 h-3.5 text-cyan-400 inline" /> Icono en la barra del navegador.
+                    {isIOS ? (
+                      <>
+                        <Share2 className="w-3.5 h-3.5 text-cyan-400 inline" /> Icono en la barra inferior de Safari.
+                      </>
+                    ) : (
+                      <>
+                        <MoreVertical className="w-3.5 h-3.5 text-cyan-400 inline" /> Botón de los 3 puntos arriba a la derecha.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -116,10 +120,10 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                 </div>
                 <div>
                   <p className="font-medium text-slate-100">
-                    Selecciona <strong>"Añadir a pantalla de inicio"</strong>
+                    Selecciona <strong>&quot;Instalar aplicación&quot;</strong> o <strong>&quot;Añadir a pantalla de inicio&quot;</strong>
                   </p>
                   <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                    <PlusSquare className="w-3.5 h-3.5 text-emerald-400 inline" /> O "Instalar aplicación".
+                    <PlusSquare className="w-3.5 h-3.5 text-emerald-400 inline" /> Se creará el ícono directo en tu teléfono.
                   </p>
                 </div>
               </div>
@@ -130,16 +134,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                 </div>
                 <div>
                   <p className="font-medium text-slate-100">
-                    ¡Listo para usar sin conexión!
+                    ¡Listo para usar como app!
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Se abrirá como una aplicación nativa independiente en pantalla completa.
+                    Se abrirá a pantalla completa y conservará tu historial sin conexión.
                   </p>
                 </div>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={() => setShowIOSGuide(false)}
               className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm transition"
             >

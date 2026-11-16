@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   X,
   Sparkles,
-  CheckCircle2,
   ExternalLink,
   Key,
   ShieldCheck,
@@ -13,14 +12,16 @@ import {
   Gift,
   Copy,
   Check,
-  Send,
   Mail,
   Loader2,
   CreditCard,
+  Receipt,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   DAILY_FREE_LIMIT,
   activateWithCode,
+  setProUser,
   setCreatorUser,
   isCreatorUser,
   getPaymentConfig,
@@ -43,17 +44,22 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   onActivated,
   usedToday,
 }) => {
-  const [code, setCode] = useState('');
-  const [codeError, setCodeError] = useState('');
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig>(() => getPaymentConfig());
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Payment confirmation / request code drawer
-  const [showPaidForm, setShowPaidForm] = useState(false);
+  // Mercado Pago Operation Number verification state
+  const [operationId, setOperationId] = useState('');
   const [payerContact, setPayerContact] = useState('');
-  const [payerDetails, setPayerDetails] = useState('PayPal ($5 USD)');
-  const [isSendingNotice, setIsSendingNotice] = useState(false);
-  const [noticeResult, setNoticeResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [isVerifyingOp, setIsVerifyingOp] = useState(false);
+  const [verifyFeedback, setVerifyFeedback] = useState<{
+    type: 'success' | 'pending' | 'error';
+    text: string;
+  } | null>(null);
+
+  // Optional private code fallback toggle
+  const [showCodeBox, setShowCodeBox] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState('');
 
   // Owner config drawer
   const [showConfigLink, setShowConfigLink] = useState(false);
@@ -74,6 +80,69 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const handleVerifyOperation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = operationId.trim().replace(/\D/g, '');
+    if (cleaned.length < 6) {
+      setVerifyFeedback({
+        type: 'error',
+        text: 'Ingresa el número de operación completo de tu comprobante de Mercado Pago (solo números).',
+      });
+      return;
+    }
+
+    setIsVerifyingOp(true);
+    setVerifyFeedback(null);
+
+    try {
+      const endpoint = getApiEndpoint('/api/verify-mercadopago');
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: cleaned,
+          contact: payerContact.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.verified) {
+        setProUser(true);
+        setVerifyFeedback({
+          type: 'success',
+          text: data.message || '¡Pago verificado! Pase Ilimitado activado.',
+        });
+        setTimeout(() => {
+          onActivated();
+          onClose();
+        }, 900);
+        return;
+      }
+
+      if (res.ok && data.pendingManualReview) {
+        setVerifyFeedback({
+          type: 'pending',
+          text: data.message || 'Número de operación registrado. En breve confirmaremos tu comprobante.',
+        });
+        setOperationId('');
+        return;
+      }
+
+      setVerifyFeedback({
+        type: 'error',
+        text: data.error || 'No se pudo validar ese número de operación. Verifica tu comprobante.',
+      });
+    } catch {
+      setVerifyFeedback({
+        type: 'error',
+        text: `Error de conexión al verificar. También puedes enviar tu comprobante a ${paymentConfig.contactEmail}.`,
+      });
+    } finally {
+      setIsVerifyingOp(false);
+    }
+  };
+
   const handleApplyCode = (e: React.FormEvent) => {
     e.preventDefault();
     setCodeError('');
@@ -89,49 +158,6 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       onClose();
     } else {
       setCodeError('Código no válido. Verifica que esté bien escrito.');
-    }
-  };
-
-  const handleSendPaymentNotice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!payerContact.trim()) return;
-
-    setIsSendingNotice(true);
-    setNoticeResult(null);
-
-    try {
-      const endpoint = getApiEndpoint('/api/feedback');
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'payment',
-          contact: payerContact.trim(),
-          message: `SOLICITUD DE CÓDIGO PRO ($5 USD / ARS)\nMedio / Comprobante: ${payerDetails.trim()}\nContacto del comprador: ${payerContact.trim()}`,
-          url: typeof window !== 'undefined' ? window.location.href : '',
-          timestamp: Date.now(),
-        }),
-      });
-
-      if (res.ok) {
-        setNoticeResult({
-          ok: true,
-          text: '¡Aviso recibido! Verificaremos tu transferencia y te enviaremos tu código de activación a la brevedad.',
-        });
-        setPayerContact('');
-      } else {
-        setNoticeResult({
-          ok: false,
-          text: `No se pudo enviar automáticamente. Escríbenos a ${paymentConfig.contactEmail} con tu comprobante.`,
-        });
-      }
-    } catch {
-      setNoticeResult({
-        ok: false,
-        text: `Error de conexión. Por favor escribe a ${paymentConfig.contactEmail} para recibir tu código.`,
-      });
-    } finally {
-      setIsSendingNotice(false);
     }
   };
 
@@ -165,7 +191,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           ) : (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               <Gift className="w-3.5 h-3.5 text-emerald-400" />
-              {freeRemaining} de {DAILY_FREE_LIMIT} consultas gratis hoy
+              {freeRemaining} de {DAILY_FREE_LIMIT} frases gratis hoy
             </span>
           )}
           <span className="text-xs text-slate-400 font-mono">
@@ -173,7 +199,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           </span>
         </div>
 
-        {/* Main Title & Price */}
+        {/* Main Title */}
         <h2 className="text-2xl font-bold tracking-tight text-white mt-1">
           {isLimitReached ? (
             <>
@@ -181,7 +207,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             </>
           ) : (
             <>
-              ¡Tienes <span className="text-emerald-400">{DAILY_FREE_LIMIT} consultas gratis</span>!
+              ¡Tienes <span className="text-emerald-400">{DAILY_FREE_LIMIT} frases gratis</span>!
             </>
           )}
         </h2>
@@ -206,17 +232,6 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           </div>
         </div>
 
-        {/* IMPORTANT CLARIFICATION BOX */}
-        <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/50 via-slate-850 to-cyan-950/50 border border-emerald-500/30 text-emerald-100 text-xs space-y-1.5 my-3">
-          <div className="flex items-center gap-2 font-bold text-emerald-300">
-            <Gift className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Sin cobros por cada frase traducida</span>
-          </div>
-          <p className="text-xs leading-relaxed text-slate-200">
-            Tienes <strong>{DAILY_FREE_LIMIT} traducciones gratuitas cada día</strong> para probar la app sin tarjeta. Con el Pase Ilimitado hablas sin límites cuando quieras.
-          </p>
-        </div>
-
         {/* Benefits List */}
         <div className="my-3 space-y-2 bg-slate-800/50 border border-slate-700/60 rounded-2xl p-3">
           <div className="flex items-center gap-2.5 text-xs">
@@ -233,64 +248,24 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           </div>
         </div>
 
-        {/* Payment Steps (PayPal Personal & ARS Transfer) */}
-        <div className="my-3 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+        {/* Payment + Instant Operation Verification */}
+        <div className="my-3 p-3.5 rounded-2xl bg-slate-950/75 border border-slate-800 space-y-3">
           <div className="flex items-center gap-2 text-xs font-bold text-cyan-300">
             <CreditCard className="w-4 h-4 text-cyan-400" />
-            <span>¿Cómo abonar y obtener tu código? (2 pasos)</span>
+            <span>Activa tu Pase en 2 pasos con Mercado Pago</span>
           </div>
 
-          {/* Step 1: Transfer options */}
+          {/* Step 1: Pay with Mercado Pago */}
           <div className="space-y-2 text-xs">
             <p className="text-[11px] font-semibold text-slate-300">
-              1. Transfiere {paymentConfig.usdPriceLabel} ({paymentConfig.arsPriceLabel}):
+              1. Realiza el pago único de {paymentConfig.usdPriceLabel} ({paymentConfig.arsPriceLabel}):
             </p>
 
-            {/* PayPal Personal option */}
-            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-2">
+            <div className="p-3 rounded-xl bg-slate-900 border border-cyan-500/30 flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-[11px] font-bold text-blue-300">PayPal Personal (USD)</p>
-                <p className="text-xs text-slate-200 font-mono truncate">
-                  {paymentConfig.paypalAccount}
-                </p>
-              </div>
-              {isPaypalLink ? (
-                <a
-                  href={paymentConfig.paypalAccount}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
-                >
-                  <span>Ir a PayPal</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleCopy(paymentConfig.paypalAccount, 'paypal')}
-                  className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
-                >
-                  {copiedField === 'paypal' ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span>Copiado</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" />
-                      <span>Copiar email</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </div>
-
-            {/* Pesos ARG option */}
-            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-cyan-300">Pesos Argentinos (Transferencia / MP)</p>
-                <p className="text-xs text-slate-300 font-mono truncate">
-                  {paymentConfig.arsTarget ? paymentConfig.arsTarget : 'Solicitar Alias / Link en el paso 2'}
+                <p className="text-xs font-bold text-cyan-300">Mercado Pago</p>
+                <p className="text-[11px] text-slate-300 truncate">
+                  Tarjeta, dinero en cuenta o transferencia
                 </p>
               </div>
               {paymentConfig.arsTarget && (
@@ -299,10 +274,10 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                     href={paymentConfig.arsTarget}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
+                    className="px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0 transition shadow-md shadow-cyan-500/20"
                   >
-                    <span>Pagar</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <span>Pagar ahora</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 ) : (
                   <button
@@ -325,71 +300,115 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 )
               )}
             </div>
-          </div>
 
-          {/* Step 2: Confirm Payment & Request Code */}
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => setShowPaidForm(!showPaidForm)}
-              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition active:scale-[0.98]"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>2. Ya aboné / Pedir mi código de desbloqueo</span>
-            </button>
-
-            {showPaidForm && (
-              <form onSubmit={handleSendPaymentNotice} className="p-3 rounded-xl bg-slate-900 border border-amber-500/30 space-y-2.5 animate-fade-in">
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Indícanos tu <strong>correo o WhatsApp</strong> y el comprobante o nombre de la transferencia para enviarte tu código al instante:
-                </p>
-                <input
-                  type="text"
-                  required
-                  value={payerContact}
-                  onChange={(e) => setPayerContact(e.target.value)}
-                  placeholder="Tu email o WhatsApp para recibir el código"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                />
-                <input
-                  type="text"
-                  value={payerDetails}
-                  onChange={(e) => setPayerDetails(e.target.value)}
-                  placeholder="Ej: PayPal $5 USD - Comprobante #..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    disabled={isSendingNotice || !payerContact.trim()}
-                    className="flex-1 py-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
+            {/* Optional PayPal if enabled later by owner */}
+            {paymentConfig.paypalAccount.trim() && (
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold text-blue-300">PayPal Personal (USD)</p>
+                  <p className="text-xs text-slate-200 font-mono truncate">
+                    {paymentConfig.paypalAccount}
+                  </p>
+                </div>
+                {isPaypalLink ? (
+                  <a
+                    href={paymentConfig.paypalAccount}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
                   >
-                    {isSendingNotice ? (
+                    <span>Ir a PayPal</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(paymentConfig.paypalAccount, 'paypal')}
+                    className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
+                  >
+                    {copiedField === 'paypal' ? (
                       <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Enviando...</span>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Copiado</span>
                       </>
                     ) : (
-                      <span>Enviar aviso y pedir código</span>
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copiar email</span>
+                      </>
                     )}
                   </button>
-                  <a
-                    href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO ($5 USD)')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado (${payerDetails}). Mi contacto es: ${payerContact}`)}`}
-                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1"
-                    title="Enviar por correo directo"
-                  >
-                    <Mail className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Email</span>
-                  </a>
-                </div>
-                {noticeResult && (
-                  <p className={`text-[11px] leading-relaxed ${noticeResult.ok ? 'text-emerald-300' : 'text-amber-300'}`}>
-                    {noticeResult.text}
-                  </p>
                 )}
-              </form>
+              </div>
             )}
           </div>
+
+          {/* Step 2: Enter Mercado Pago Operation Number */}
+          <form onSubmit={handleVerifyOperation} className="space-y-2 pt-1 border-t border-slate-800/80">
+            <label className="text-[11px] font-semibold text-slate-200 block">
+              2. Ingresa tu <span className="text-amber-300">Número de operación</span> de Mercado Pago para desbloquear:
+            </label>
+            <div className="relative">
+              <Receipt className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-amber-400" />
+              <input
+                type="text"
+                inputMode="numeric"
+                value={operationId}
+                onChange={(e) => setOperationId(e.target.value)}
+                placeholder="Ej: 12345678901 (figura en tu comprobante)"
+                className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 font-mono outline-none transition"
+              />
+            </div>
+
+            <input
+              type="text"
+              value={payerContact}
+              onChange={(e) => setPayerContact(e.target.value)}
+              placeholder="Tu email o WhatsApp (opcional, para respaldo)"
+              className="w-full bg-slate-900 border border-slate-700/80 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none transition"
+            />
+
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={isVerifyingOp || !operationId.trim()}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition active:scale-[0.98] disabled:opacity-50"
+              >
+                {isVerifyingOp ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Verificando pago...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Verificar operación y desbloquear</span>
+                  </>
+                )}
+              </button>
+              <a
+                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 shrink-0"
+                title="Enviar comprobante por correo"
+              >
+                <Mail className="w-3.5 h-3.5 text-cyan-400" />
+              </a>
+            </div>
+
+            {verifyFeedback && (
+              <div
+                className={`p-2.5 rounded-xl text-[11px] leading-relaxed border ${
+                  verifyFeedback.type === 'success'
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                    : verifyFeedback.type === 'pending'
+                    ? 'bg-cyan-950/60 border-cyan-500/40 text-cyan-200'
+                    : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                {verifyFeedback.text}
+              </div>
+            )}
+          </form>
         </div>
 
         {/* Continue free button if remaining */}
@@ -403,62 +422,59 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           </button>
         )}
 
-        {/* Divider */}
-        <div className="relative my-4 text-center">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-800" />
-          </div>
-          <span className="relative px-3 bg-slate-900 text-xs text-slate-400 uppercase tracking-wider">
-            ¿Ya tienes tu código?
-          </span>
-        </div>
-
-        {/* Code Activation Form (No leaked code example!) */}
-        <form onSubmit={handleApplyCode} className="space-y-2">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Key className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Ingresa tu código de activación"
-                className="w-full bg-slate-800/90 border border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition-colors uppercase font-mono"
-              />
-            </div>
-            <button
-              type="submit"
-              className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm transition-colors active:scale-95"
-            >
-              Activar
-            </button>
-          </div>
-
-          {codeError && (
-            <p className="text-xs text-rose-400 pl-1">{codeError}</p>
-          )}
-        </form>
-
-        {/* Creator Access Shortcut */}
-        <div className="mt-4 p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/30 text-center space-y-1.5">
-          <p className="text-xs text-amber-300 font-semibold flex items-center justify-center gap-1.5">
-            <span>👑</span>
-            <span>¿Eres la Creadora / Administradora?</span>
-          </p>
-          <p className="text-[11px] text-slate-300 leading-tight">
-            Activa el Modo Creador para traducir sin límites y quedar excluida del contador de visitas.
-          </p>
+        {/* Secondary Code / Creator Access Collapsible */}
+        <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2.5">
           <button
             type="button"
-            onClick={() => {
-              setCreatorUser(true);
-              onActivated();
-              onClose();
-            }}
-            className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 text-xs font-bold border border-amber-500/40 transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+            onClick={() => setShowCodeBox(!showCodeBox)}
+            className="w-full text-center text-xs text-slate-400 hover:text-cyan-300 transition flex items-center justify-center gap-1.5"
           >
-            <span>Activar Modo Creador (Ilimitado)</span>
+            <Key className="w-3.5 h-3.5" />
+            <span>¿Ya tienes un código especial o eres la administradora?</span>
           </button>
+
+          {showCodeBox && (
+            <div className="space-y-3 animate-fade-in">
+              <form onSubmit={handleApplyCode} className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Ingresa tu código de activación"
+                    className="flex-1 bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 uppercase font-mono"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors"
+                  >
+                    Activar
+                  </button>
+                </div>
+                {codeError && (
+                  <p className="text-xs text-rose-400 pl-1">{codeError}</p>
+                )}
+              </form>
+
+              <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/30 text-center space-y-1.5">
+                <p className="text-xs text-amber-300 font-semibold flex items-center justify-center gap-1.5">
+                  <span>👑</span>
+                  <span>Modo Creadora / Administradora</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatorUser(true);
+                    onActivated();
+                    onClose();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 text-xs font-bold border border-amber-500/40 transition-all"
+                >
+                  Activar Modo Creador (Ilimitado)
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer info & owner link config toggle */}
@@ -488,31 +504,31 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             <form onSubmit={handleSaveConfig} className="space-y-2">
               <div>
                 <label className="text-[11px] text-slate-400 block mb-0.5">
-                  Email de PayPal o enlace PayPal.me:
-                </label>
-                <input
-                  type="text"
-                  value={paymentConfig.paypalAccount}
-                  onChange={(e) => setPaymentConfig({ ...paymentConfig, paypalAccount: e.target.value })}
-                  placeholder="tu-correo@gmail.com o https://paypal.me/..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-slate-400 block mb-0.5">
-                  Alias / CVU / Link en Pesos Argentinos:
+                  Link o Alias de Mercado Pago:
                 </label>
                 <input
                   type="text"
                   value={paymentConfig.arsTarget}
                   onChange={(e) => setPaymentConfig({ ...paymentConfig, arsTarget: e.target.value })}
-                  placeholder="Ej: mi.alias.mp o https://mpago.la/..."
+                  placeholder="https://mpago.la/224fBsf"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-0.5">
+                  Email de PayPal o enlace PayPal.me (opcional, vacío = oculto):
+                </label>
+                <input
+                  type="text"
+                  value={paymentConfig.paypalAccount}
+                  onChange={(e) => setPaymentConfig({ ...paymentConfig, paypalAccount: e.target.value })}
+                  placeholder="Opcional (ej: https://paypal.me/...)"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
                 />
               </div>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[10px] text-slate-400">
-                  Para fijarlos globalmente, compárteme tu Alias/PayPal.me.
+                  Verificación automática activa al configurar MERCADOPAGO_ACCESS_TOKEN.
                 </span>
                 <button
                   type="submit"
@@ -529,7 +545,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             {isOwner && (
               <div className="pt-2 border-t border-slate-800 space-y-1">
                 <p className="text-[11px] font-bold text-amber-300">
-                  🔑 Tus códigos privados para entregar al confirmar pago:
+                  🔑 Códigos privados de respaldo (para activar manualmente):
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {PRIVATE_CUSTOMER_CODES.map((c) => (

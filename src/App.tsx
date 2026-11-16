@@ -739,7 +739,9 @@ export default function App() {
               </button>
             </div>
 
-            {/* Always-Visible Ajustes Button with label */}
+            {/* Always-Visible Install + Ajustes Buttons */}
+            <PWAInstallButton variant="header" />
+
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-500/40 text-slate-100 text-xs font-bold transition shadow-sm active:scale-95"
@@ -857,19 +859,19 @@ export default function App() {
               }`}
               title={
                 remainingQuota > 0
-                  ? `Tienes ${remainingQuota} de ${DAILY_FREE_LIMIT} consultas gratuitas de prueba. Clic para ver detalles.`
-                  : `Completaste tus ${DAILY_FREE_LIMIT} consultas gratis. Clic para activar Pase Ilimitado.`
+                  ? `Tienes ${remainingQuota} de ${DAILY_FREE_LIMIT} frases gratuitas de prueba. Clic para ver detalles.`
+                  : `Completaste tus ${DAILY_FREE_LIMIT} frases gratis de hoy. Clic para activar Pase Ilimitado.`
               }
             >
               {remainingQuota > 0 ? (
                 <>
                   <Gift className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                  <span>{remainingQuota} de {DAILY_FREE_LIMIT} gratis</span>
+                  <span>{remainingQuota} de {DAILY_FREE_LIMIT} frases gratis</span>
                 </>
               ) : (
                 <>
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>0 de {DAILY_FREE_LIMIT} gratis</span>
+                  <span>0 de {DAILY_FREE_LIMIT} frases gratis</span>
                 </>
               )}
             </button>
@@ -887,8 +889,6 @@ export default function App() {
               <span className="text-[10px] text-amber-400 font-semibold">👑</span>
             )}
           </button>
-
-          <PWAInstallButton variant="header" />
 
           <a
             href={typeof window !== 'undefined' ? window.location.href : '#'}
@@ -958,8 +958,8 @@ export default function App() {
               <Gift className="w-3.5 h-3.5 text-emerald-400" />
             </span>
             <span className="truncate text-[11px] sm:text-xs">
-              <strong className="text-emerald-300 font-bold">{DAILY_FREE_LIMIT} consultas gratis:</strong> Pruébalo sin costo.{' '}
-              <span className="text-slate-300 hidden md:inline">¡No cobramos por cada consulta!</span>
+              <strong className="text-emerald-300 font-bold">{DAILY_FREE_LIMIT} frases gratis al día:</strong> Pruébalo sin costo.{' '}
+              <span className="text-slate-300 hidden md:inline">¡No cobramos por cada frase!</span>
               <button
                 onClick={() => setIsPaywallOpen(true)}
                 className="underline text-cyan-300 hover:text-white ml-1.5 font-semibold inline"

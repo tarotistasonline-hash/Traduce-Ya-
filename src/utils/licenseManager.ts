@@ -44,15 +44,15 @@ export interface PaymentConfig {
 
 export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
   usdPriceLabel: '$5 USD',
-  arsPriceLabel: 'Equivalente en pesos ARS',
-  paypalAccount: 'tarotistasonline@gmail.com',
-  arsTarget: '',
+  arsPriceLabel: 'o equivalente en tu moneda (Mercado Pago)',
+  paypalAccount: '', // Oculto por ahora hasta que la dueña decida habilitar PayPal
+  arsTarget: 'https://mpago.la/224fBsf',
   whatsappOrContact: '',
   contactEmail: 'tarotistasonline@gmail.com',
 };
 
-// Default payment link (legacy fallback)
-export const DEFAULT_PAYMENT_URL = 'https://link.mercadopago.com.ar/';
+// Default payment link
+export const DEFAULT_PAYMENT_URL = 'https://mpago.la/224fBsf';
 
 export function getTodayDateString(): string {
   const now = new Date();
@@ -193,11 +193,14 @@ export function getPaymentConfig(): PaymentConfig {
     const raw = localStorage.getItem(STORAGE_KEY_PAYMENT_CONFIG);
     if (raw) {
       const parsed = JSON.parse(raw);
+      const savedPaypal = typeof parsed.paypalAccount === 'string' && parsed.paypalAccount !== 'tarotistasonline@gmail.com'
+        ? parsed.paypalAccount
+        : DEFAULT_PAYMENT_CONFIG.paypalAccount;
       return {
         usdPriceLabel: parsed.usdPriceLabel || DEFAULT_PAYMENT_CONFIG.usdPriceLabel,
         arsPriceLabel: parsed.arsPriceLabel || DEFAULT_PAYMENT_CONFIG.arsPriceLabel,
-        paypalAccount: parsed.paypalAccount || DEFAULT_PAYMENT_CONFIG.paypalAccount,
-        arsTarget: parsed.arsTarget ?? DEFAULT_PAYMENT_CONFIG.arsTarget,
+        paypalAccount: savedPaypal,
+        arsTarget: parsed.arsTarget || DEFAULT_PAYMENT_CONFIG.arsTarget,
         whatsappOrContact: parsed.whatsappOrContact ?? DEFAULT_PAYMENT_CONFIG.whatsappOrContact,
         contactEmail: parsed.contactEmail || DEFAULT_PAYMENT_CONFIG.contactEmail,
       };

@@ -198,19 +198,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Consultas Gratuitas de Prueba y Pase Ilimitado (Aclaración importante) */}
+          {/* Frases Gratuitas de Prueba y Pase Ilimitado (Aclaración importante) */}
           <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-800 border border-emerald-500/30 shadow-md space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span className="flex items-center gap-1.5 text-emerald-300">
                 <Gift className="w-4 h-4 text-emerald-400" />
-                <span>Consultas Gratuitas y Precios</span>
+                <span>Frases Gratuitas y Precios</span>
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
                 {isPro ? 'Pase Ilimitado' : `${remainingQuota ?? DAILY_FREE_LIMIT} de ${DAILY_FREE_LIMIT} gratis`}
               </span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por consulta individual. Dispones de <strong>{DAILY_FREE_LIMIT} consultas gratuitas diarias</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites diarios, puedes activar el Pase Ilimitado con un único pago.
+              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por frase individual. Dispones de <strong>{DAILY_FREE_LIMIT} frases gratuitas diarias</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites diarios, puedes activar el Pase Ilimitado con un único pago de $5 USD (o equivalente en ARS).
             </p>
             {onOpenPaywall && (
               <button
@@ -221,7 +221,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}
                 className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
               >
-                <span>{isPro ? 'Ver detalles de Pase Ilimitado' : 'Ver consultas gratis / Activar Pase'}</span>
+                <span>{isPro ? 'Ver detalles de Pase Ilimitado' : 'Ver frases gratis / Activar Pase ($5 USD)'}</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
             )}
