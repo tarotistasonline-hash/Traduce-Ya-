@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "VisitorStats": {
+      "title": "VisitorStats",
+      "description": "Public aggregate visitor metrics for Traduce Ya (no PII).",
+      "type": "object",
+      "properties": {
+        "totalVisits": {
+          "type": "integer",
+          "description": "Cumulative total visits across all sessions."
+        },
+        "todayVisits": {
+          "type": "integer",
+          "description": "Total visits recorded on lastDate (UTC YYYY-MM-DD)."
+        },
+        "uniqueVisitors": {
+          "type": "integer",
+          "description": "Cumulative unique visitor devices recorded."
+        },
+        "lastDate": {
+          "type": "string",
+          "format": "date",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "UTC date string (YYYY-MM-DD) for todayVisits."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest visit update."
+        }
+      },
+      "required": [
+        "totalVisits",
+        "todayVisits",
+        "uniqueVisitors",
+        "lastDate",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/stats/visitors": {
+      "schema": {
+        "$ref": "#/entities/VisitorStats"
+      },
+      "description": "Single aggregate visitor counter document shared across preview and published builds."
+    }
+  }
+}

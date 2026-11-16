@@ -574,11 +574,17 @@ export default function App() {
           }, 2500);
         }
       } catch (err: any) {
-        console.error('[App:handleProcessAudio] Audio translation failure:', err);
-        const errorText =
-          err?.message?.includes('Failed to fetch') || err?.message?.includes('conectar con el servidor')
-            ? 'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.'
-            : err?.message || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.';
+        console.warn('[App:handleProcessAudio] Audio translation notice:', err);
+        const rawMsg = String(err?.message || '');
+        const isFetchIssue =
+          rawMsg.includes('Failed to fetch') ||
+          rawMsg.includes('Load failed') ||
+          rawMsg.includes('NetworkError') ||
+          rawMsg.includes('conectar con el servidor') ||
+          rawMsg.includes('interrumpió la conexión');
+        const errorText = isFetchIssue
+          ? 'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.'
+          : rawMsg || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.';
         setStatusAlert({
           message: errorText,
           type: 'error',

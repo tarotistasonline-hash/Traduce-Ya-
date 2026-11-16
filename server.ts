@@ -514,7 +514,7 @@ Respond strictly with a JSON object:
       lastError = primaryErr;
       console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen):', primaryErr?.message || primaryErr);
 
-      // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen
+      // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen (low thinking for fast audio response)
       try {
         response = await ai.models.generateContent({
           model: 'gemini-4-hydrogen',
@@ -523,27 +523,12 @@ Respond strictly with a JSON object:
           },
           config: {
             responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
         });
-      } catch (liteErr: any) {
-        lastError = liteErr;
-        console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe):', liteErr?.message || liteErr);
-
-        // 3. Fallback: Audio transcription with gemini-3.5-transcribe
-        try {
-          response = await ai.models.generateContent({
-            model: 'gemini-3.5-transcribe',
-            contents: {
-              parts: [audioPart, { text: promptText }],
-            },
-            config: {
-              responseMimeType: 'application/json',
-            },
-          });
-        } catch (transcribeErr: any) {
-          lastError = transcribeErr;
-          console.error('All audio translation models failed:', transcribeErr?.message || transcribeErr);
-        }
+      } catch (fallbackErr: any) {
+        lastError = fallbackErr;
+        console.error('Audio translation models failed:', fallbackErr?.message || fallbackErr);
       }
     }
 

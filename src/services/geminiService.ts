@@ -34,7 +34,16 @@ async function parseJsonSafely(res: Response): Promise<any> {
       'El servidor de traducción devolvió una respuesta no válida (verifica si la sesión expiró o si el dominio tiene acceso al backend /api).'
     );
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err: any) {
+    if (isNetworkFetchError(err)) {
+      throw new Error(
+        'Se interrumpió la conexión al leer la respuesta del servidor. Intenta nuevamente.'
+      );
+    }
+    throw new Error('La respuesta del servidor de traducción no pudo leerse correctamente.');
+  }
 }
 
 export async function translateText(
@@ -154,7 +163,7 @@ export async function translateAudioBlob(
   const data = await parseJsonSafely(res);
   if (!res.ok) {
     const errorMsg = data?.error || `Error ${res.status} al procesar audio en servidor`;
-    console.error('[translateAudioBlob] Server returned error response:', { status: res.status, errorMsg });
+    console.warn('[translateAudioBlob] Server returned error notice:', { status: res.status, errorMsg });
     throw new Error(errorMsg);
   }
 
