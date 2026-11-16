@@ -14,7 +14,7 @@ import { getApiEndpoint } from '../utils/apiConfig';
 
 export interface FeedbackItem {
   id: string;
-  type: 'issue' | 'suggestion' | 'praise';
+  type: 'issue' | 'suggestion' | 'praise' | 'payment';
   message: string;
   contact?: string;
   activeLanguagePair?: { from: string; to: string };
@@ -114,6 +114,7 @@ export const FeedbackViewerModal: React.FC<FeedbackViewerModalProps> = ({
             items.map((item) => {
               const isIssue = item.type === 'issue';
               const isPraise = item.type === 'praise';
+              const isPayment = item.type === 'payment';
               const dateStr = item.timestamp
                 ? new Date(item.timestamp).toLocaleString()
                 : 'Reciente';
@@ -124,6 +125,8 @@ export const FeedbackViewerModal: React.FC<FeedbackViewerModalProps> = ({
                   className={`p-3.5 rounded-xl border space-y-2 transition ${
                     isIssue
                       ? 'bg-rose-950/20 border-rose-500/30'
+                      : isPayment
+                      ? 'bg-cyan-950/30 border-cyan-500/40'
                       : isPraise
                       ? 'bg-emerald-950/20 border-emerald-500/30'
                       : 'bg-amber-950/20 border-amber-500/30'
@@ -134,17 +137,22 @@ export const FeedbackViewerModal: React.FC<FeedbackViewerModalProps> = ({
                       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-semibold text-[11px] border ${
                         isIssue
                           ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                          : isPayment
+                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                           : isPraise
                           ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                           : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                       }`}
                     >
                       {isIssue && <AlertTriangle className="w-3 h-3 text-rose-400" />}
+                      {isPayment && <Mail className="w-3 h-3 text-cyan-400" />}
                       {isPraise && <Heart className="w-3 h-3 text-emerald-400" />}
-                      {!isIssue && !isPraise && <Lightbulb className="w-3 h-3 text-amber-400" />}
+                      {!isIssue && !isPraise && !isPayment && <Lightbulb className="w-3 h-3 text-amber-400" />}
                       <span>
                         {isIssue
                           ? 'Reporte de Error'
+                          : isPayment
+                          ? 'Aviso de Pago / Solicitud de Código'
                           : isPraise
                           ? 'Felicitación'
                           : 'Sugerencia'}

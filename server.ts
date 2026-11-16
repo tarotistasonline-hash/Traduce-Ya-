@@ -247,6 +247,60 @@ app.post('/api/visits', (req, res) => {
   });
 });
 
+// Feedback & Payment Notice Endpoints
+const FEEDBACK_FILE = path.join(__dirname, 'feedback_messages.json');
+
+function readFeedbackMessages(): any[] {
+  try {
+    if (fs.existsSync(FEEDBACK_FILE)) {
+      const raw = fs.readFileSync(FEEDBACK_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (err) {
+    console.warn('Could not read feedback_messages.json:', err);
+  }
+  return [];
+}
+
+function writeFeedbackMessages(items: any[]) {
+  try {
+    fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(items.slice(0, 200), null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Could not write feedback_messages.json:', err);
+  }
+}
+
+app.get('/api/feedback', (req, res) => {
+  const items = readFeedbackMessages();
+  return res.json({ items });
+});
+
+app.post('/api/feedback', (req, res) => {
+  try {
+    const { type = 'suggestion', message, contact, activeLanguagePair, deviceInfo, url, timestamp } = req.body || {};
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'El mensaje es obligatorio.' });
+    }
+    const items = readFeedbackMessages();
+    const newItem = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      type: ['issue', 'suggestion', 'praise', 'payment'].includes(type) ? type : 'suggestion',
+      message: message.trim().slice(0, 2000),
+      contact: typeof contact === 'string' ? contact.trim().slice(0, 200) : undefined,
+      activeLanguagePair,
+      deviceInfo: typeof deviceInfo === 'string' ? deviceInfo.slice(0, 200) : undefined,
+      url: typeof url === 'string' ? url.slice(0, 300) : undefined,
+      timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+    };
+    items.unshift(newItem);
+    writeFeedbackMessages(items);
+    return res.json({ ok: true, item: newItem });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Error al guardar el mensaje.' });
+  }
+});
+
 // Audio Multimodal Direct Translation Endpoint
 app.post('/api/translate-audio', async (req, res) => {
   const { audioBase64, mimeType = 'audio/webm', fromLang, toLang } = req.body || {};
@@ -461,6 +515,7 @@ async function startServer() {
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
       },
       appType: 'spa',
     });

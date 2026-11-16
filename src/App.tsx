@@ -857,19 +857,19 @@ export default function App() {
               }`}
               title={
                 remainingQuota > 0
-                  ? `Tienes ${remainingQuota} de 2 consultas gratuitas de prueba. Clic para ver detalles.`
-                  : 'Completaste tus 2 consultas gratis. Clic para activar Pase Ilimitado.'
+                  ? `Tienes ${remainingQuota} de ${DAILY_FREE_LIMIT} consultas gratuitas de prueba. Clic para ver detalles.`
+                  : `Completaste tus ${DAILY_FREE_LIMIT} consultas gratis. Clic para activar Pase Ilimitado.`
               }
             >
               {remainingQuota > 0 ? (
                 <>
                   <Gift className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                  <span>{remainingQuota} de 2 gratis</span>
+                  <span>{remainingQuota} de {DAILY_FREE_LIMIT} gratis</span>
                 </>
               ) : (
                 <>
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>0 de 2 gratis</span>
+                  <span>0 de {DAILY_FREE_LIMIT} gratis</span>
                 </>
               )}
             </button>
@@ -958,7 +958,7 @@ export default function App() {
               <Gift className="w-3.5 h-3.5 text-emerald-400" />
             </span>
             <span className="truncate text-[11px] sm:text-xs">
-              <strong className="text-emerald-300 font-bold">2 consultas gratis:</strong> Pruébalo sin costo.{' '}
+              <strong className="text-emerald-300 font-bold">{DAILY_FREE_LIMIT} consultas gratis:</strong> Pruébalo sin costo.{' '}
               <span className="text-slate-300 hidden md:inline">¡No cobramos por cada consulta!</span>
               <button
                 onClick={() => setIsPaywallOpen(true)}
@@ -969,7 +969,7 @@ export default function App() {
             </span>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 ml-2">
-            {remainingQuota} / 2 disponibles
+            {remainingQuota} / {DAILY_FREE_LIMIT} disponibles
           </span>
         </div>
       )}

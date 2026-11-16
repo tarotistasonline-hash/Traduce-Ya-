@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="es" translate="no" class="notranslate">
   <head>
     <meta charset="UTF-8" />
+    <meta name="google" content="notranslate" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Traduce Ya - Traductor de Voz y Conversación</title>
     <meta name="description" content="Traductor simultáneo por voz y audio para conversaciones cara a cara y manos libres en cualquier idioma." />
@@ -23,6 +24,24 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script>
       // Gracefully prevent benign preview errors (WebSocket, mic permission in iframe, SpeechRecognition) from bubbling to AI Studio error harness
+      (function() {
+        var origError = console.error;
+        console.error = function() {
+          try {
+            var joined = Array.prototype.slice.call(arguments).map(function(a) {
+              return a && a.message ? a.message : String(a);
+            }).join(' ');
+            if (
+              joined.includes('WebSocket closed without opened') ||
+              joined.includes('failed to connect to websocket') ||
+              (arguments[0] === '[vite]' && joined.includes('WebSocket'))
+            ) {
+              return;
+            }
+          } catch (e) {}
+          return origError.apply(console, arguments);
+        };
+      })();
       window.addEventListener('error', function(e) {
         if (!e) return;
         var msg = (e.message || '') + ' ' + (e.filename || '');
@@ -61,8 +80,8 @@
       }, true);
     </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body translate="no" class="notranslate">
+    <div id="root" translate="no" class="notranslate"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

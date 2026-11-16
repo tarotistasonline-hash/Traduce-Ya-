@@ -29,6 +29,7 @@ import {
   Gift,
   Zap,
   Radio,
+  Languages,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -168,6 +169,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
+          {/* Aviso importante: Desactivar traductor automático del navegador */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-800/90 border border-amber-500/40 shadow-md space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center border border-amber-500/30 shrink-0">
+                  <Languages className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-amber-200 text-sm leading-tight">
+                    Desactiva el traductor del navegador
+                  </h4>
+                  <p className="text-[11px] text-amber-300/80">
+                    Muy importante si usas Chrome o Safari
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
+                Recomendado
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Si tienes activado el <strong className="text-amber-200">traductor automático de tu navegador</strong> o extensiones que traducen páginas completas, es muy frecuente que modifiquen la pantalla en vivo y provoquen errores (como <em>&quot;insertBefore&quot;</em>).
+            </p>
+            <div className="p-2.5 rounded-xl bg-slate-950/70 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
+              💡 <strong className="text-slate-100">Qué hacer:</strong> Toca el icono de traducir en la barra de tu navegador y selecciona <strong className="text-amber-300">&quot;No traducir nunca este sitio&quot;</strong>. Esta app ya incluye su propio motor de traducción simultánea.
+            </div>
+          </div>
+
           {/* Consultas Gratuitas de Prueba y Pase Ilimitado (Aclaración importante) */}
           <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-800 border border-emerald-500/30 shadow-md space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold">
@@ -176,11 +206,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>Consultas Gratuitas y Precios</span>
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-                {isPro ? 'Pase Ilimitado' : `${remainingQuota ?? 2} de ${DAILY_FREE_LIMIT} gratis`}
+                {isPro ? 'Pase Ilimitado' : `${remainingQuota ?? DAILY_FREE_LIMIT} de ${DAILY_FREE_LIMIT} gratis`}
               </span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por consulta individual. Dispones de <strong>2 consultas gratuitas</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites diarios, puedes activar el Pase Ilimitado con un único pago.
+              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por consulta individual. Dispones de <strong>{DAILY_FREE_LIMIT} consultas gratuitas diarias</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites diarios, puedes activar el Pase Ilimitado con un único pago.
             </p>
             {onOpenPaywall && (
               <button

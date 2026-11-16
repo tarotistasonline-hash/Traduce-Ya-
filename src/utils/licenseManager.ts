@@ -6,16 +6,19 @@ const STORAGE_KEY_PRO = 'traductor_ya_pro_v1';
 const STORAGE_KEY_CREATOR = 'traductor_ya_creator_mode_v1';
 const STORAGE_KEY_USAGE = 'traductor_ya_daily_usage_v1';
 const STORAGE_KEY_PAYMENT_URL = 'traductor_ya_custom_payment_url';
+const STORAGE_KEY_PAYMENT_CONFIG = 'traductor_ya_payment_config_v1';
 
-// Accepted activation codes (case-insensitive)
-export const VALID_ACTIVATION_CODES = [
-  'TRADUCEYA',
+// Private customer unlock codes (give one to the buyer after confirming payment)
+export const PRIVATE_CUSTOMER_CODES = [
+  'TYPRO-8472',
+  'TYVIP-5910',
+  'TYPAS-3309',
+  'TYARG-7124',
+  'TYUSD-4481',
   'TRADUCEYA2026',
-  'PRO2026',
-  'VIP2026',
-  'ILIMITADO',
-  'PREMIUM',
-  'TAROT2026',
+];
+
+export const CREATOR_CODES = [
   'CREADOR',
   'CREADOR2026',
   'TAROTISTASONLINE',
@@ -24,7 +27,31 @@ export const VALID_ACTIVATION_CODES = [
   'DEV',
 ];
 
-// Default payment link (user can customize this)
+// Accepted activation codes (case-insensitive)
+export const VALID_ACTIVATION_CODES = [
+  ...PRIVATE_CUSTOMER_CODES,
+  ...CREATOR_CODES,
+];
+
+export interface PaymentConfig {
+  usdPriceLabel: string;
+  arsPriceLabel: string;
+  paypalAccount: string; // Email or https://paypal.me/... link
+  arsTarget: string; // Alias, CVU or https://mpago.la/... link
+  whatsappOrContact: string;
+  contactEmail: string;
+}
+
+export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
+  usdPriceLabel: '$5 USD',
+  arsPriceLabel: 'Equivalente en pesos ARS',
+  paypalAccount: 'tarotistasonline@gmail.com',
+  arsTarget: '',
+  whatsappOrContact: '',
+  contactEmail: 'tarotistasonline@gmail.com',
+};
+
+// Default payment link (legacy fallback)
 export const DEFAULT_PAYMENT_URL = 'https://link.mercadopago.com.ar/';
 
 export function getTodayDateString(): string {
@@ -35,12 +62,10 @@ export function getTodayDateString(): string {
 export function isCreatorUser(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    // 1. Manually saved in localStorage by the owner
     if (localStorage.getItem(STORAGE_KEY_CREATOR) === 'true') {
       return true;
     }
 
-    // 2. Query param ?creator=true, ?creador=true, ?admin=true
     const params = new URLSearchParams(window.location.search);
     if (
       params.get('creator') === 'true' ||
@@ -68,7 +93,6 @@ export function setCreatorUser(status: boolean): void {
 }
 
 export function isProUser(): boolean {
-  // Creator always has unlimited PRO access
   if (isCreatorUser()) return true;
   try {
     return localStorage.getItem(STORAGE_KEY_PRO) === 'true';
@@ -133,7 +157,7 @@ export function canPerformTranslation(): boolean {
 export function activateWithCode(rawCode: string): boolean {
   const clean = rawCode.trim().toUpperCase();
   if (VALID_ACTIVATION_CODES.includes(clean)) {
-    if (['CREADOR', 'CREADOR2026', 'TAROTISTASONLINE', 'TAROTISTAS', 'ADMIN', 'DEV'].includes(clean)) {
+    if (CREATOR_CODES.includes(clean)) {
       setCreatorUser(true);
     } else {
       setProUser(true);
@@ -164,9 +188,37 @@ export function setPaymentUrl(url: string): void {
   }
 }
 
+export function getPaymentConfig(): PaymentConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PAYMENT_CONFIG);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        usdPriceLabel: parsed.usdPriceLabel || DEFAULT_PAYMENT_CONFIG.usdPriceLabel,
+        arsPriceLabel: parsed.arsPriceLabel || DEFAULT_PAYMENT_CONFIG.arsPriceLabel,
+        paypalAccount: parsed.paypalAccount || DEFAULT_PAYMENT_CONFIG.paypalAccount,
+        arsTarget: parsed.arsTarget ?? DEFAULT_PAYMENT_CONFIG.arsTarget,
+        whatsappOrContact: parsed.whatsappOrContact ?? DEFAULT_PAYMENT_CONFIG.whatsappOrContact,
+        contactEmail: parsed.contactEmail || DEFAULT_PAYMENT_CONFIG.contactEmail,
+      };
+    }
+  } catch {}
+  return DEFAULT_PAYMENT_CONFIG;
+}
+
+export function savePaymentConfig(config: Partial<PaymentConfig>): PaymentConfig {
+  const next = { ...getPaymentConfig(), ...config };
+  try {
+    localStorage.setItem(STORAGE_KEY_PAYMENT_CONFIG, JSON.stringify(next));
+  } catch (e) {
+    console.warn('Failed to save payment config:', e);
+  }
+  return next;
+}
+
 /**
  * Check if the user returned from a successful payment redirection
- * e.g., ?unlocked=true, ?premium=true, ?pro=true, ?pago=exitoso, ?status=approved
+ * e.g., ?unlocked=true, ?premium=true, ?pro=true, ?pago=exitoso, ?status=approved, ?code=TYPRO-8472
  */
 export function checkUrlAutoUnlock(): boolean {
   if (typeof window === 'undefined') return false;
@@ -185,7 +237,6 @@ export function checkUrlAutoUnlock(): boolean {
     if (unlockParam || validCode) {
       setProUser(true);
 
-      // Clean the query parameter from URL cleanly without reload
       const newUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, newUrl);
       return true;
