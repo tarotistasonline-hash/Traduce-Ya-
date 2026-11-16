@@ -4,17 +4,24 @@ import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
-// Register Service Worker for offline capabilities and PWA caching
+// Clean up stale Service Workers in dev preview; register PWA SW in production
 if ('serviceWorker' in navigator) {
-  const updateSW = registerSW({
-    immediate: true,
-    onNeedRefresh() {
-      updateSW(true);
-    },
-    onOfflineReady() {
-      console.log('PWA: Modo sin conexión preparado.');
-    },
-  });
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker
+      .getRegistrations()
+      .then((regs) => regs.forEach((reg) => reg.unregister()))
+      .catch(() => {});
+  } else {
+    const updateSW = registerSW({
+      immediate: true,
+      onNeedRefresh() {
+        updateSW(true);
+      },
+      onOfflineReady() {
+        console.log('PWA: Modo sin conexión preparado.');
+      },
+    });
+  }
 }
 
 createRoot(document.getElementById('root')!).render(
