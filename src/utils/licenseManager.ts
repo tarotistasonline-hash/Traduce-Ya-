@@ -16,6 +16,7 @@ export const PRIVATE_CUSTOMER_CODES = [
   'TYARG-7124',
   'TYUSD-4481',
   'TRADUCEYA2026',
+  'TRADUCEYA2027',
 ];
 
 export const CREATOR_CODES = [
