@@ -24,7 +24,7 @@ let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 
 function getAiClient(): GoogleGenAI | null {
-  const currentKey = process.env.GEMINI_API_KEY;
+  const currentKey = process.env.GEMINI_API_KEY?.trim();
   if (!currentKey) return null;
 
   if (!aiClient || cachedApiKey !== currentKey) {
@@ -91,9 +91,10 @@ async function proxyToFallbackOrigin(req: express.Request, res: express.Response
 
 app.get('/api/status', (_req, res) => {
   return res.json({
-    hasApiKey: !!process.env.GEMINI_API_KEY,
-    mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN,
+    hasApiKey: !!process.env.GEMINI_API_KEY?.trim(),
+    mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN?.trim(),
     runtime: 'vercel',
+    version: 2,
     status: 'ok',
   });
 });
@@ -379,7 +380,7 @@ app.post('/api/tts', async (req, res) => {
 });
 
 app.post('/api/verify-mercadopago', async (req, res) => {
-  const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN?.trim();
   if (!mpToken) {
     return proxyToFallbackOrigin(req, res);
   }
