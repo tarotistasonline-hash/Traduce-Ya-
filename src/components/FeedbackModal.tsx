@@ -85,7 +85,7 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
       console.warn('Error sending feedback:', err);
       setSubmitResult({
         ok: false,
-        text: 'No se pudo conectar con el buzón en este momento. Puedes escribirnos directamente a tarotistasonline@gmail.com.',
+        text: 'No se pudo conectar con el buzón en este momento. Puedes escribirnos directamente a azulbaires@gmail.com.',
       });
     } finally {
       setIsSubmitting(false);

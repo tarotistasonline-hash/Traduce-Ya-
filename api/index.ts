@@ -381,18 +381,45 @@ app.post('/api/tts', async (req, res) => {
 
 app.post('/api/verify-mercadopago', async (req, res) => {
   const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN?.trim();
-  if (!mpToken) {
-    return proxyToFallbackOrigin(req, res);
-  }
 
   try {
-    const { operationId } = req.body || {};
+    const { operationId, contact } = req.body || {};
     const cleanId = String(operationId || '').trim().replace(/\D/g, '');
     if (!cleanId || cleanId.length < 6 || cleanId.length > 20) {
       return res.status(400).json({
         ok: false,
         error: 'Ingresa un número de operación válido de Mercado Pago (solo números, ej: 12345678901).',
       });
+    }
+
+    const cleanContact = typeof contact === 'string' ? contact.trim().slice(0, 200) : '';
+
+    const recordPendingManualReview = async () => {
+      try {
+        await fetch(`${FALLBACK_API_ORIGIN}/api/feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'payment',
+            message: `NÚMERO DE OPERACIÓN MERCADO PAGO: #${cleanId}\n(Confirmación manual pendiente: verificar acreditación y enviar código al comprador).`,
+            contact: cleanContact || 'Sin contacto informado',
+            timestamp: Date.now(),
+          }),
+        });
+      } catch {
+        // Non-blocking best-effort logging to Buzón
+      }
+
+      return res.status(202).json({
+        ok: true,
+        verified: false,
+        pendingManualReview: true,
+        message: `¡Registramos tu número de operación (#${cleanId})! Para enviarte tu código de activación enseguida, toca el botón abajo para avisarnos a azulbaires@gmail.com.`,
+      });
+    };
+
+    if (!mpToken) {
+      return await recordPendingManualReview();
     }
 
     const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(cleanId)}`, {
@@ -410,10 +437,7 @@ app.post('/api/verify-mercadopago', async (req, res) => {
           error: 'No encontramos ese número de operación en Mercado Pago. Revisa tu comprobante e inténtalo de nuevo.',
         });
       }
-      return res.status(502).json({
-        ok: false,
-        error: 'No se pudo consultar Mercado Pago en este momento. Intenta nuevamente en unos segundos.',
-      });
+      return await recordPendingManualReview();
     }
 
     const paymentData: any = await mpResponse.json();

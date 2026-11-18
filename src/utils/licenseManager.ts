@@ -49,7 +49,7 @@ export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
   paypalAccount: '', // Oculto por ahora hasta que la dueña decida habilitar PayPal
   arsTarget: 'https://mpago.la/224fBsf',
   whatsappOrContact: '',
-  contactEmail: 'tarotistasonline@gmail.com',
+  contactEmail: 'azulbaires@gmail.com',
 };
 
 // Default payment link
@@ -197,13 +197,19 @@ export function getPaymentConfig(): PaymentConfig {
       const savedPaypal = typeof parsed.paypalAccount === 'string' && parsed.paypalAccount !== 'tarotistasonline@gmail.com'
         ? parsed.paypalAccount
         : DEFAULT_PAYMENT_CONFIG.paypalAccount;
+      const savedContactEmail =
+        typeof parsed.contactEmail === 'string' &&
+        parsed.contactEmail.trim() &&
+        parsed.contactEmail !== 'tarotistasonline@gmail.com'
+          ? parsed.contactEmail
+          : DEFAULT_PAYMENT_CONFIG.contactEmail;
       return {
         usdPriceLabel: parsed.usdPriceLabel || DEFAULT_PAYMENT_CONFIG.usdPriceLabel,
         arsPriceLabel: parsed.arsPriceLabel || DEFAULT_PAYMENT_CONFIG.arsPriceLabel,
         paypalAccount: savedPaypal,
         arsTarget: parsed.arsTarget || DEFAULT_PAYMENT_CONFIG.arsTarget,
         whatsappOrContact: parsed.whatsappOrContact ?? DEFAULT_PAYMENT_CONFIG.whatsappOrContact,
-        contactEmail: parsed.contactEmail || DEFAULT_PAYMENT_CONFIG.contactEmail,
+        contactEmail: savedContactEmail,
       };
     }
   } catch {}

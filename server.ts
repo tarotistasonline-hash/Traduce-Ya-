@@ -399,13 +399,12 @@ app.post('/api/verify-mercadopago', async (req, res) => {
     const cleanContact = typeof contact === 'string' ? contact.trim().slice(0, 200) : '';
     const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
 
-    // If MERCADOPAGO_ACCESS_TOKEN is NOT configured yet, register safely in Buzón for owner review
-    if (!mpToken) {
+    const recordPendingManual = () => {
       const items = readFeedbackMessages();
       items.unshift({
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         type: 'payment',
-        message: `NÚMERO DE OPERACIÓN MERCADO PAGO: ${cleanId}\n(Verificación automática pendiente: configura MERCADOPAGO_ACCESS_TOKEN en el servidor o envía un código al comprador).`,
+        message: `NÚMERO DE OPERACIÓN MERCADO PAGO: #${cleanId}\n(Confirmación manual pendiente: verifica el pago y envía tu código al comprador).`,
         contact: cleanContact || 'Sin contacto informado',
         timestamp: Date.now(),
       });
@@ -415,8 +414,13 @@ app.post('/api/verify-mercadopago', async (req, res) => {
         ok: true,
         verified: false,
         pendingManualReview: true,
-        message: `¡Recibimos tu número de operación (#${cleanId})! En breve confirmaremos el comprobante y te enviaremos tu acceso.`,
+        message: `¡Registramos tu número de operación (#${cleanId})! Para enviarte tu código de activación enseguida, toca el botón abajo para avisarnos a azulbaires@gmail.com.`,
       });
+    };
+
+    // If MERCADOPAGO_ACCESS_TOKEN is NOT configured yet, register safely in Buzón for owner review
+    if (!mpToken) {
+      return recordPendingManual();
     }
 
     // Check if operation ID was already claimed
@@ -444,10 +448,7 @@ app.post('/api/verify-mercadopago', async (req, res) => {
           error: 'No encontramos ese número de operación en Mercado Pago. Revisa tu comprobante e inténtalo de nuevo.',
         });
       }
-      return res.status(502).json({
-        ok: false,
-        error: 'No se pudo consultar Mercado Pago en este momento. Intenta nuevamente en unos segundos.',
-      });
+      return recordPendingManual();
     }
 
     const paymentData: any = await mpResponse.json();

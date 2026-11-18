@@ -49,6 +49,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
 
   // Mercado Pago Operation Number verification state
   const [operationId, setOperationId] = useState('');
+  const [submittedOpId, setSubmittedOpId] = useState('');
   const [payerContact, setPayerContact] = useState('');
   const [isVerifyingOp, setIsVerifyingOp] = useState(false);
   const [verifyFeedback, setVerifyFeedback] = useState<{
@@ -91,6 +92,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       return;
     }
 
+    setSubmittedOpId(cleaned);
     setIsVerifyingOp(true);
     setVerifyFeedback(null);
 
@@ -123,9 +125,19 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       if (res.ok && data.pendingManualReview) {
         setVerifyFeedback({
           type: 'pending',
-          text: data.message || 'Número de operación registrado. En breve confirmaremos tu comprobante.',
+          text:
+            data.message ||
+            `¡Registramos tu número de operación (#${cleaned})! Envíanos este comprobante a ${paymentConfig.contactEmail} y te responderemos enseguida con tu código de activación.`,
         });
         setOperationId('');
+        return;
+      }
+
+      if (res.status >= 500) {
+        setVerifyFeedback({
+          type: 'pending',
+          text: `Recibimos tu número de operación (#${cleaned}). Por favor envíanoslo por correo a ${paymentConfig.contactEmail} para confirmarlo en Mercado Pago y enviarte tu código de activación.`,
+        });
         return;
       }
 
@@ -135,8 +147,8 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       });
     } catch {
       setVerifyFeedback({
-        type: 'error',
-        text: `Error de conexión al verificar. También puedes enviar tu comprobante a ${paymentConfig.contactEmail}.`,
+        type: 'pending',
+        text: `Para activar tu pase enseguida, envíanos tu número de operación (#${cleaned}) a ${paymentConfig.contactEmail}.`,
       });
     } finally {
       setIsVerifyingOp(false);
@@ -387,9 +399,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 )}
               </button>
               <a
-                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
+                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
                 className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 shrink-0"
-                title="Enviar comprobante por correo"
+                title={`Enviar comprobante a ${paymentConfig.contactEmail}`}
               >
                 <Mail className="w-3.5 h-3.5 text-cyan-400" />
               </a>
@@ -397,17 +409,37 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
 
             {verifyFeedback && (
               <div
-                className={`p-2.5 rounded-xl text-[11px] leading-relaxed border ${
+                className={`p-3 rounded-xl text-[11px] leading-relaxed border space-y-2 ${
                   verifyFeedback.type === 'success'
                     ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
                     : verifyFeedback.type === 'pending'
-                    ? 'bg-cyan-950/60 border-cyan-500/40 text-cyan-200'
+                    ? 'bg-cyan-950/60 border-cyan-500/40 text-cyan-100'
                     : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
                 }`}
               >
-                {verifyFeedback.text}
+                <p>{verifyFeedback.text}</p>
+                {verifyFeedback.type === 'pending' && (
+                  <a
+                    href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent(`Comprobante Traduce Ya PRO - Op #${submittedOpId || operationId}`)}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado.\nNúmero de operación de Mercado Pago: ${submittedOpId || operationId || '[pegar número]'}\nMi contacto para recibir el código: ${payerContact || '(responder a este correo)'}`)}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Enviar comprobante a {paymentConfig.contactEmail}</span>
+                  </a>
+                )}
               </div>
             )}
+
+            <p className="text-[10px] text-slate-400 leading-snug">
+              ¿Ya pagaste? Envía el número de operación a{' '}
+              <a
+                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
+                className="text-cyan-300 underline hover:text-white"
+              >
+                {paymentConfig.contactEmail}
+              </a>{' '}
+              para recibir tu código de activación.
+            </p>
           </form>
         </div>
 
