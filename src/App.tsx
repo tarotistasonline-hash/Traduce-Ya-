@@ -236,6 +236,16 @@ export default function App() {
   const handleProcessSpeechRef = useRef<(text: string, speaker: 'user' | 'partner') => void>(() => {});
   const handleProcessAudioRef = useRef<(blob: Blob, speaker: 'user' | 'partner') => void>(() => {});
   const handleStartListeningRef = useRef<(speaker: 'user' | 'partner') => void>(() => {});
+  const continuousTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isContinuousRef = useRef(isContinuous);
+  isContinuousRef.current = isContinuous;
+
+  const clearContinuousHandoff = useCallback(() => {
+    if (continuousTimerRef.current) {
+      clearTimeout(continuousTimerRef.current);
+      continuousTimerRef.current = null;
+    }
+  }, []);
 
   // Speech Recognition Hook
   const {
@@ -309,6 +319,7 @@ export default function App() {
       }
 
       try {
+        clearContinuousHandoff();
         stopSpeaking();
         setActiveSpeaker(speaker);
         activeSpeakerRef.current = speaker;
@@ -319,15 +330,16 @@ export default function App() {
         console.warn('handleStartListening caught error safely:', err);
       }
     },
-    [isPro, partnerLang.code, startListening, stopSpeaking, userLang.code]
+    [clearContinuousHandoff, isPro, partnerLang.code, startListening, stopSpeaking, userLang.code]
   );
   handleStartListeningRef.current = handleStartListening;
 
   const handleStopListening = useCallback(() => {
+    clearContinuousHandoff();
     setActiveSpeaker(null);
     activeSpeakerRef.current = null;
     stopListening();
-  }, [stopListening]);
+  }, [clearContinuousHandoff, stopListening]);
 
   // Handle final speech text and translate
   const handleProcessSpeech = useCallback(
@@ -429,25 +441,34 @@ export default function App() {
           setRemainingQuota(getRemainingTranslations());
         }
 
-        // Auto speak translation immediately without delaying UI display
-        if (settings.autoSpeak) {
-          speak(result.translatedText, finalSpeechCode, {
-            speed: settings.voiceSpeed,
-            preferAi: settings.useAiVoice,
-          });
-        }
+        // Clear translating indicator right away so text appears immediately
+        setIsTranslating(false);
+        setTranslatingSpeaker(null);
 
         // Haptic feedback if supported
         if (settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate?.([60]);
         }
 
-        // If continuous mode is on, toggle listener to other speaker after a brief pause
-        if (isContinuous) {
+        // Auto speak translation; in continuous mode wait until speech finishes before switching mic
+        if (settings.autoSpeak) {
+          const speakPromise = speak(result.translatedText, finalSpeechCode, {
+            speed: settings.voiceSpeed,
+            preferAi: settings.useAiVoice,
+          });
+          if (isContinuousRef.current) {
+            await speakPromise;
+          }
+        }
+
+        if (isContinuousRef.current && activeSpeakerRef.current === null) {
           const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
-          setTimeout(() => {
-            handleStartListeningRef.current(nextSpeaker);
-          }, 1600);
+          clearContinuousHandoff();
+          continuousTimerRef.current = setTimeout(() => {
+            if (isContinuousRef.current && activeSpeakerRef.current === null) {
+              handleStartListeningRef.current(nextSpeaker);
+            }
+          }, settings.autoSpeak ? 450 : 1200);
         }
       } catch (err: any) {
         console.warn('Translation workflow notice:', err);
@@ -461,7 +482,7 @@ export default function App() {
         setTranslatingSpeaker(null);
       }
     },
-    [isContinuous, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
+    [clearContinuousHandoff, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceName, settings.voiceSpeed, speak, userLang]
   );
   handleProcessSpeechRef.current = handleProcessSpeech;
 
@@ -572,23 +593,33 @@ export default function App() {
           setRemainingQuota(getRemainingTranslations());
         }
 
-        // Auto speak translation immediately!
-        if (settings.autoSpeak && finalTranslatedText) {
-          speak(finalTranslatedText, targetSpeechCode, {
-            speed: settings.voiceSpeed,
-            preferAi: settings.useAiVoice,
-          });
-        }
+        setIsTranslating(false);
+        setTranslatingSpeaker(null);
+        setInterimText('');
 
         if (settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate?.([60]);
         }
 
-        if (isContinuous) {
+        // Auto speak translation; in continuous mode wait until speech finishes before switching mic
+        if (settings.autoSpeak && finalTranslatedText) {
+          const speakPromise = speak(finalTranslatedText, targetSpeechCode, {
+            speed: settings.voiceSpeed,
+            preferAi: settings.useAiVoice,
+          });
+          if (isContinuousRef.current) {
+            await speakPromise;
+          }
+        }
+
+        if (isContinuousRef.current && activeSpeakerRef.current === null) {
           const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
-          setTimeout(() => {
-            handleStartListeningRef.current(nextSpeaker);
-          }, 1600);
+          clearContinuousHandoff();
+          continuousTimerRef.current = setTimeout(() => {
+            if (isContinuousRef.current && activeSpeakerRef.current === null) {
+              handleStartListeningRef.current(nextSpeaker);
+            }
+          }, settings.autoSpeak ? 450 : 1200);
         }
       } catch (err: any) {
         console.warn('[App:handleProcessAudio] Audio translation notice:', err);
@@ -613,7 +644,7 @@ export default function App() {
         setInterimText('');
       }
     },
-    [isContinuous, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceSpeed, speak, userLang]
+    [clearContinuousHandoff, isPro, partnerLang, settings.autoSpeak, settings.hapticFeedback, settings.useAiVoice, settings.voiceSpeed, speak, userLang]
   );
   handleProcessAudioRef.current = handleProcessAudio;
 

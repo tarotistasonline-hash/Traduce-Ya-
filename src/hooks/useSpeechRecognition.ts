@@ -35,7 +35,7 @@ export function useSpeechRecognition({
   onAudioRecorded,
   onEnd,
   onError,
-  silenceTimeoutMs = 850,
+  silenceTimeoutMs = 1500,
   noiseFilter = true,
 }: UseSpeechRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
@@ -153,10 +153,10 @@ export function useSpeechRecognition({
       try {
         mediaRecorderRef.current!.stop();
       } catch {}
-      // Give MediaRecorder a brief moment to emit final dataavailable/onstop before tearing down streams
+      // Give MediaRecorder enough time on mobile to emit final dataavailable/onstop before tearing down streams
       setTimeout(() => {
         cleanupAudioStream();
-      }, 200);
+      }, 450);
     } else {
       cleanupAudioStream();
     }
@@ -293,11 +293,10 @@ export function useSpeechRecognition({
               if (!vadSilenceTimerRef.current && !hasSpeechApiResultsRef.current) {
                 vadSilenceTimerRef.current = setTimeout(() => {
                   if (!hasDispatchedRef.current) {
-                    finishUtterance();
                     stopListening();
                     onEndRef.current?.();
                   }
-                }, 950);
+                }, 1700);
               }
             }
 
@@ -424,12 +423,24 @@ export function useSpeechRecognition({
         };
 
         recognition.onend = () => {
-          if (!hasDispatchedRef.current) {
-            finishUtterance();
+          // If SpeechRecognition ended without producing text (e.g. mobile network/no-speech hiccup)
+          // while MediaRecorder is actively capturing audio, keep MediaRecorder + VAD running!
+          const recorderActive =
+            mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording';
+          if (!hasSpeechApiResultsRef.current && recorderActive && !hasDispatchedRef.current) {
+            return;
           }
-          cleanupAudioStream();
-          setIsListening(false);
-          onEndRef.current?.();
+
+          if (!hasDispatchedRef.current) {
+            stopListening();
+            onEndRef.current?.();
+          } else {
+            setTimeout(() => {
+              cleanupAudioStream();
+            }, 350);
+            setIsListening(false);
+            onEndRef.current?.();
+          }
         };
 
         recognitionRef.current = recognition;
