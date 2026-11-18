@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:match*",
-      "destination": "https://ais-pre-fn5tz4dobb6so5ytrfrpwr-172786148761.us-east1.run.app/api/:match*"
+      "destination": "/api/index?__path=:match*"
     },
     {
       "source": "/(.*)",
