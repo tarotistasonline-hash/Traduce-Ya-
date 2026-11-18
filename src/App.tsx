@@ -46,7 +46,6 @@ import {
 import {
   translateText,
   translateAudioBlob,
-  generateAiSpeech,
 } from './services/geminiService';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
@@ -371,16 +370,6 @@ export default function App() {
           }
         }
 
-        let cachedAudio: string | undefined = undefined;
-        if (settings.useAiVoice) {
-          try {
-            const aiAudio = await generateAiSpeech(result.translatedText, settings.voiceName);
-            if (aiAudio) cachedAudio = aiAudio;
-          } catch (e) {
-            console.warn('AI voice generation fallback to browser TTS:', e);
-          }
-        }
-
         // Ensure final speech code is a valid locale
         let finalSpeechCode = targetSpeechLangCode;
         if (!finalSpeechCode || finalSpeechCode === 'auto') {
@@ -399,7 +388,6 @@ export default function App() {
           phonetic: result.phonetic,
           nuance: result.nuance,
           alternatives: result.alternatives,
-          audioBase64: cachedAudio,
           timestamp: Date.now(),
         };
 
@@ -411,12 +399,11 @@ export default function App() {
           setRemainingQuota(getRemainingTranslations());
         }
 
-        // Auto speak translation
+        // Auto speak translation immediately without delaying UI display
         if (settings.autoSpeak) {
           speak(result.translatedText, finalSpeechCode, {
             speed: settings.voiceSpeed,
             preferAi: settings.useAiVoice,
-            cachedAudioBase64: cachedAudio,
           });
         }
 
@@ -430,7 +417,7 @@ export default function App() {
           const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
           setTimeout(() => {
             handleStartListeningRef.current(nextSpeaker);
-          }, 3000);
+          }, 1600);
         }
       } catch (err: any) {
         console.warn('Translation workflow notice:', err);
@@ -571,7 +558,7 @@ export default function App() {
           const nextSpeaker = speaker === 'user' ? 'partner' : 'user';
           setTimeout(() => {
             handleStartListeningRef.current(nextSpeaker);
-          }, 2500);
+          }, 1600);
         }
       } catch (err: any) {
         console.warn('[App:handleProcessAudio] Audio translation notice:', err);

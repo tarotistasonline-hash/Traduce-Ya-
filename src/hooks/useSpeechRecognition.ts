@@ -35,7 +35,7 @@ export function useSpeechRecognition({
   onAudioRecorded,
   onEnd,
   onError,
-  silenceTimeoutMs = 1500,
+  silenceTimeoutMs = 850,
   noiseFilter = true,
 }: UseSpeechRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
@@ -297,7 +297,7 @@ export function useSpeechRecognition({
                     stopListening();
                     onEndRef.current?.();
                   }
-                }, 1600);
+                }, 950);
               }
             }
 

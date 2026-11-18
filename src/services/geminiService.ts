@@ -23,8 +23,24 @@ function isNetworkFetchError(err: unknown): boolean {
     msg.includes('Failed to fetch') ||
     msg.includes('Load failed') ||
     msg.includes('NetworkError') ||
+    msg.includes('AbortError') ||
+    msg.includes('aborted') ||
     msg.includes('fetch')
   );
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function parseJsonSafely(res: Response): Promise<any> {
@@ -57,11 +73,15 @@ export async function translateText(
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: requestBody,
-      });
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+        },
+        15000
+      );
 
       const data = await parseJsonSafely(res);
       if (!res.ok) {
@@ -70,8 +90,13 @@ export async function translateText(
       return data;
     } catch (err: any) {
       console.warn(`Translate attempt ${attempt + 1} notice:`, err);
+      if (err?.name === 'AbortError') {
+        throw new Error(
+          'La traducción tardó demasiado en responder. Intenta nuevamente con una frase más corta.'
+        );
+      }
       if (attempt === 0 && isNetworkFetchError(err)) {
-        await new Promise((r) => setTimeout(r, 450));
+        await new Promise((r) => setTimeout(r, 350));
         continue;
       }
       if (isNetworkFetchError(err)) {
@@ -138,16 +163,25 @@ export async function translateAudioBlob(
   let res: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-      });
+      res = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+        },
+        20000
+      );
       break;
     } catch (fetchErr: any) {
       console.warn(`[translateAudioBlob] Fetch attempt ${attempt + 1} failed:`, fetchErr);
+      if (fetchErr?.name === 'AbortError') {
+        throw new Error(
+          'El análisis de audio tardó demasiado en responder. Intenta hablar más cerca o una frase más breve.'
+        );
+      }
       if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 450));
+        await new Promise((r) => setTimeout(r, 350));
         continue;
       }
       throw new Error(
@@ -182,11 +216,15 @@ export async function generateAiSpeech(
 ): Promise<string | null> {
   try {
     const url = getApiEndpoint('/api/tts');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceName }),
-    });
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceName }),
+      },
+      6000
+    );
 
     if (!res.ok) return null;
     const data = await parseJsonSafely(res);

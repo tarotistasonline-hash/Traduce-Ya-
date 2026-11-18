@@ -50,6 +50,26 @@ function isQuotaError(err: any): boolean {
   );
 }
 
+function isUnavailableError(err: any): boolean {
+  const msg = String(err?.message || err || '');
+  return (
+    err?.status === 503 ||
+    msg.includes('503') ||
+    msg.includes('UNAVAILABLE') ||
+    msg.toLowerCase().includes('high demand')
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
 // Health check / status
 app.get('/api/status', (req, res) => {
   res.json({
@@ -102,22 +122,50 @@ Respond ONLY with valid JSON in this schema:
 
     let response;
     try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+      response = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+          },
+        }),
+        7500,
+        'gemini-3.1-flash-lite translate'
+      );
     } catch (primaryErr: any) {
       console.warn('gemini-3.1-flash-lite translate fallback to gemini-4-hydrogen:', primaryErr?.message || primaryErr);
-      response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+      try {
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            },
+          }),
+          9000,
+          'gemini-4-hydrogen translate'
+        );
+      } catch (fallbackErr: any) {
+        if (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) {
+          await new Promise((r) => setTimeout(r, 400));
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: 'gemini-3.1-flash-lite',
+              contents: prompt,
+              config: {
+                responseMimeType: 'application/json',
+              },
+            }),
+            7500,
+            'gemini-3.1-flash-lite retry'
+          );
+        } else {
+          throw fallbackErr;
+        }
+      }
     }
 
     const rawText = response.text || '{}';
@@ -138,10 +186,12 @@ Respond ONLY with valid JSON in this schema:
       alternatives: data.alternatives || [],
     });
   } catch (error: any) {
-    console.error('Translation error:', error);
-    const status = isQuotaError(error) ? 429 : 500;
+    console.warn('Translation notice:', error?.message || error);
+    const status = isQuotaError(error) ? 429 : isUnavailableError(error) ? 503 : 500;
     const message = isQuotaError(error)
       ? 'Se alcanzó temporalmente el límite de solicitudes de traducción. Inténtalo de nuevo en unos segundos.'
+      : isUnavailableError(error)
+      ? 'El motor de traducción está con alta demanda temporal. Intenta de nuevo en unos segundos.'
       : error.message || 'Error al traducir el texto.';
     return res.status(status).json({ error: message });
   }
@@ -501,41 +551,73 @@ Respond strictly with a JSON object:
 
     // 1. Primary: Direct multimodal translation with gemini-3.1-flash-lite
     try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: {
-          parts: [audioPart, { text: promptText }],
-        },
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+      response = await withTimeout(
+        ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: {
+            parts: [audioPart, { text: promptText }],
+          },
+          config: {
+            responseMimeType: 'application/json',
+          },
+        }),
+        10000,
+        'gemini-3.1-flash-lite audio'
+      );
     } catch (primaryErr: any) {
       lastError = primaryErr;
       console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen):', primaryErr?.message || primaryErr);
 
       // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen (low thinking for fast audio response)
       try {
-        response = await ai.models.generateContent({
-          model: 'gemini-4-hydrogen',
-          contents: {
-            parts: [audioPart, { text: promptText }],
-          },
-          config: {
-            responseMimeType: 'application/json',
-            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          },
-        });
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: {
+              parts: [audioPart, { text: promptText }],
+            },
+            config: {
+              responseMimeType: 'application/json',
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            },
+          }),
+          11000,
+          'gemini-4-hydrogen audio'
+        );
       } catch (fallbackErr: any) {
         lastError = fallbackErr;
-        console.error('Audio translation models failed:', fallbackErr?.message || fallbackErr);
+        if (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) {
+          try {
+            await new Promise((r) => setTimeout(r, 400));
+            response = await withTimeout(
+              ai.models.generateContent({
+                model: 'gemini-3.1-flash-lite',
+                contents: {
+                  parts: [audioPart, { text: promptText }],
+                },
+                config: {
+                  responseMimeType: 'application/json',
+                },
+              }),
+              10000,
+              'gemini-3.1-flash-lite audio retry'
+            );
+          } catch (retryErr: any) {
+            lastError = retryErr;
+          }
+        }
+        if (!response) {
+          console.warn('Audio translation models notice:', lastError?.message || lastError);
+        }
       }
     }
 
     if (!response) {
-      const status = isQuotaError(lastError) ? 429 : 500;
+      const status = isQuotaError(lastError) ? 429 : isUnavailableError(lastError) ? 503 : 500;
       const message = isQuotaError(lastError)
         ? 'Se alcanzó el límite de solicitudes de traducción de audio. Espera un momento o usa el micrófono nuevamente.'
+        : isUnavailableError(lastError)
+        ? 'El motor de traducción de audio está con alta demanda temporal. Intenta de nuevo en unos segundos.'
         : lastError?.message || 'No se pudo procesar el audio en el servidor.';
       return res.status(status).json({ error: message });
     }
