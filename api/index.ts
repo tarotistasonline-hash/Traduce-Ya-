@@ -94,7 +94,7 @@ app.get('/api/status', (_req, res) => {
     hasApiKey: !!process.env.GEMINI_API_KEY?.trim(),
     mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN?.trim(),
     runtime: 'vercel',
-    version: 2,
+    version: 3,
     status: 'ok',
   });
 });
