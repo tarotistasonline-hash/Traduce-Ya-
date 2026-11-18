@@ -441,7 +441,22 @@ export function useSpeechRecognition({
       }
     } catch (err: any) {
       console.warn('Audio capture notice:', err);
-      onErrorRef.current?.(err?.message || 'No se pudo acceder al micrófono');
+      const errName = err?.name || '';
+      const errMsg = String(err?.message || '').toLowerCase();
+      if (
+        errName === 'NotAllowedError' ||
+        errName === 'PermissionDeniedError' ||
+        errMsg.includes('permission denied') ||
+        errMsg.includes('not allowed')
+      ) {
+        onErrorRef.current?.('not-allowed');
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        onErrorRef.current?.('mic-busy');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        onErrorRef.current?.('mic-not-found');
+      } else {
+        onErrorRef.current?.(err?.message || 'No se pudo acceder al micrófono');
+      }
       setIsListening(false);
       cleanupAudioStream();
     }

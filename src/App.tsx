@@ -262,10 +262,31 @@ export default function App() {
       setInterimText('');
       if (err === 'not-allowed') {
         setStatusAlert({
-          message: 'Permiso de micrófono no concedido en el navegador.',
+          message:
+            'Permiso de micrófono bloqueado: toca el ícono de candado/ajustes junto a la URL → Micrófono → Permitir (o abre en Chrome/Safari).',
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 6000);
+        setTimeout(() => setStatusAlert(null), 9000);
+      } else if (err === 'mic-busy') {
+        setStatusAlert({
+          message:
+            'El micrófono está ocupado por otra app o llamada. Ciérrala e intenta de nuevo.',
+          type: 'error',
+        });
+        setTimeout(() => setStatusAlert(null), 7000);
+      } else if (err === 'mic-not-found') {
+        setStatusAlert({
+          message:
+            'No se detectó ningún micrófono conectado en este dispositivo.',
+          type: 'error',
+        });
+        setTimeout(() => setStatusAlert(null), 7000);
+      } else if (err) {
+        setStatusAlert({
+          message: `No se pudo iniciar el micrófono (${err}).`,
+          type: 'error',
+        });
+        setTimeout(() => setStatusAlert(null), 7000);
       }
     },
   });
@@ -764,7 +785,10 @@ export default function App() {
 
           {/* Quick 1-Tap Audio Diagnostic */}
           <button
-            onClick={() => setIsAudioDiagnosticOpen(true)}
+            onClick={() => {
+              handleStopListening();
+              setIsAudioDiagnosticOpen(true);
+            }}
             className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 active:scale-95"
             title="Probar calidad de audio, silencio y clipping del micrófono"
           >
@@ -916,6 +940,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setStatusAlert(null);
+                    handleStopListening();
                     setIsAudioDiagnosticOpen(true);
                   }}
                   className="text-[10px] underline font-semibold text-cyan-300 hover:text-white"

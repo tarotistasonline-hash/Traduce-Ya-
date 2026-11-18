@@ -209,8 +209,22 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
         },
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (constraintErr: any) {
+        if (
+          selectedDeviceId !== 'default' &&
+          (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'NotFoundError')
+        ) {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          throw constraintErr;
+        }
+      }
       mediaStreamRef.current = stream;
+      setPermissionState('granted');
+      setErrorMessage(null);
 
       const track = stream.getAudioTracks()[0];
       if (track) {
@@ -397,11 +411,34 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
     } catch (err: any) {
       console.warn('Microphone live stream init failed:', err);
       setIsLiveMonitoring(false);
-      setPermissionState('denied');
-      setErrorMessage(
-        err?.message ||
-          'No se pudo acceder al micrófono. Por favor permite el acceso en el navegador.'
-      );
+      const errName = err?.name || '';
+      const rawMsg = String(err?.message || '').toLowerCase();
+      const isDenied =
+        errName === 'NotAllowedError' ||
+        errName === 'PermissionDeniedError' ||
+        rawMsg.includes('permission denied') ||
+        rawMsg.includes('not allowed') ||
+        rawMsg.includes('permiso');
+
+      if (isDenied) {
+        setPermissionState('denied');
+        setErrorMessage(
+          'Permiso de micrófono denegado por el navegador o visor. Toca el candado/ajustes junto a la barra de dirección → Micrófono → Permitir, o abre la app directamente en Chrome/Safari.'
+        );
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setErrorMessage(
+          'El micrófono está siendo usado por otra aplicación o llamada. Cierra esa app y pulsa Reintentar.'
+        );
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setErrorMessage(
+          'No se encontró ningún micrófono disponible en este dispositivo.'
+        );
+      } else {
+        setErrorMessage(
+          err?.message ||
+            'No se pudo acceder al micrófono. Por favor permite el acceso en el navegador.'
+        );
+      }
     }
   }, [cleanupStream, noiseFilterEnabled, selectedDeviceId]);
 
@@ -777,19 +814,39 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Error Banner */}
           {errorMessage && (
-            <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-between gap-3 shadow-lg">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{errorMessage}</span>
+            <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 text-xs space-y-2.5 shadow-lg">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{errorMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="p-1 hover:bg-rose-900/50 rounded text-rose-400 hover:text-rose-100 shrink-0"
+                  title="Cerrar aviso"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setErrorMessage(null)}
-                className="p-1 hover:bg-rose-900/50 rounded text-rose-400 hover:text-rose-100"
-                title="Cerrar aviso"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex flex-wrap items-center gap-2 pl-6">
+                <button
+                  type="button"
+                  onClick={startLiveInspection}
+                  className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold text-[11px] flex items-center gap-1.5 transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reintentar permiso</span>
+                </button>
+                <a
+                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-semibold text-[11px] transition"
+                >
+                  Abrir en pestaña nueva
+                </a>
+              </div>
             </div>
           )}
 
