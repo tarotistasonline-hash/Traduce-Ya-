@@ -138,6 +138,14 @@ export default function App() {
     return false;
   });
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [iframeBannerDismissed, setIframeBannerDismissed] = useState(false);
+  const isInIframe = (() => {
+    try {
+      return typeof window !== 'undefined' && window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
 
   // Modals state
   const [isUserLangModalOpen, setIsUserLangModalOpen] = useState(false);
@@ -262,11 +270,12 @@ export default function App() {
       setInterimText('');
       if (err === 'not-allowed') {
         setStatusAlert({
-          message:
-            'Permiso de micrófono bloqueado: toca el ícono de candado/ajustes junto a la URL → Micrófono → Permitir (o abre en Chrome/Safari).',
+          message: isInIframe
+            ? 'La Vista Previa bloquea el micrófono en móviles. Toca "Abrir en Chrome" abajo para usarlo.'
+            : 'Permiso de micrófono bloqueado: toca el candado/ajustes junto a la URL → Micrófono → Permitir.',
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 9000);
+        setTimeout(() => setStatusAlert(null), 12000);
       } else if (err === 'mic-busy') {
         setStatusAlert({
           message:
@@ -923,27 +932,64 @@ export default function App() {
       {/* Offline Status Indicator */}
       <OfflineIndicator />
 
+      {/* Embedded Preview Iframe Notice for Mobile Mic Access */}
+      {isInIframe && !iframeBannerDismissed && (
+        <div className="bg-cyan-950/90 border-b border-cyan-500/40 px-3 py-1.5 text-xs text-cyan-100 flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <span className="text-[11px] leading-snug">
+              Vista previa integrada: si el micrófono no responde en el celular, ábrela directo en el navegador.
+            </span>
+            <a
+              href={typeof window !== 'undefined' ? window.location.href : '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-0.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 shrink-0 transition"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>Abrir en Chrome</span>
+            </a>
+          </div>
+          <button
+            onClick={() => setIframeBannerDismissed(true)}
+            className="text-[10px] text-cyan-300 hover:text-white px-1 py-0.5 shrink-0"
+            title="Cerrar aviso"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Alert toast notification */}
       {statusAlert && (
         <div
-          className={`px-3 py-1.5 text-xs flex items-center justify-between z-40 border-b animate-fade-in shrink-0 ${
+          className={`px-3 py-2 text-xs flex items-start justify-between gap-2 z-40 border-b animate-fade-in shrink-0 ${
             statusAlert.type === 'error'
-              ? 'bg-rose-950/90 text-rose-200 border-rose-500/40'
+              ? 'bg-rose-950/95 text-rose-100 border-rose-500/40'
               : 'bg-emerald-950/90 text-emerald-200 border-emerald-500/40'
           }`}
         >
-          <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{statusAlert.message}</span>
+          <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-300" />
+              <span className="leading-snug">{statusAlert.message}</span>
+            </div>
             {statusAlert.type === 'error' && (
-              <div className="flex items-center gap-2 shrink-0 ml-1.5">
+              <div className="flex flex-wrap items-center gap-2 pl-6">
+                <a
+                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 rounded-md bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"
+                >
+                  Abrir en Chrome / pestaña nueva
+                </a>
                 <button
                   onClick={() => {
                     setStatusAlert(null);
                     handleStopListening();
                     setIsAudioDiagnosticOpen(true);
                   }}
-                  className="text-[10px] underline font-semibold text-cyan-300 hover:text-white"
+                  className="text-[11px] underline font-semibold text-cyan-300 hover:text-white"
                 >
                   Diagnosticar Audio
                 </button>
@@ -952,7 +998,7 @@ export default function App() {
                     setStatusAlert(null);
                     setIsFeedbackOpen(true);
                   }}
-                  className="text-[10px] underline font-semibold text-rose-300 hover:text-white"
+                  className="text-[11px] underline font-semibold text-rose-300 hover:text-white"
                 >
                   Avisar en Buzón
                 </button>
@@ -961,7 +1007,7 @@ export default function App() {
           </div>
           <button
             onClick={() => setStatusAlert(null)}
-            className="text-[10px] uppercase font-mono px-1 py-0.5 ml-2 hover:opacity-80 shrink-0"
+            className="text-[11px] uppercase font-mono px-1.5 py-0.5 hover:opacity-80 shrink-0"
           >
             ✕
           </button>

@@ -214,8 +214,8 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (constraintErr: any) {
         if (
-          selectedDeviceId !== 'default' &&
-          (constraintErr?.name === 'OverconstrainedError' || constraintErr?.name === 'NotFoundError')
+          constraintErr?.name === 'OverconstrainedError' ||
+          (selectedDeviceId !== 'default' && constraintErr?.name === 'NotFoundError')
         ) {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } else {
@@ -422,8 +422,17 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
 
       if (isDenied) {
         setPermissionState('denied');
+        const runningInFrame = (() => {
+          try {
+            return typeof window !== 'undefined' && window.self !== window.top;
+          } catch {
+            return true;
+          }
+        })();
         setErrorMessage(
-          'Permiso de micrófono denegado por el navegador o visor. Toca el candado/ajustes junto a la barra de dirección → Micrófono → Permitir, o abre la app directamente en Chrome/Safari.'
+          runningInFrame
+            ? 'La Vista Previa integrada bloquea el micrófono en móviles. Toca "Abrir en Chrome / pestaña nueva" abajo para usar el micrófono sin bloqueos.'
+            : 'Permiso de micrófono bloqueado en este navegador. Toca el ícono de ajustes/candado junto a la barra de dirección → Micrófono → Permitir, y pulsa "Reintentar permiso".'
         );
       } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
         setErrorMessage(
@@ -830,6 +839,14 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-2 pl-6">
+                <a
+                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"
+                >
+                  Abrir en Chrome / pestaña nueva
+                </a>
                 <button
                   type="button"
                   onClick={startLiveInspection}
@@ -838,14 +855,6 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Reintentar permiso</span>
                 </button>
-                <a
-                  href={typeof window !== 'undefined' ? window.location.href : '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-semibold text-[11px] transition"
-                >
-                  Abrir en pestaña nueva
-                </a>
               </div>
             </div>
           )}
@@ -926,21 +935,29 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                 {/* Silence Indicator */}
                 <div
                   className={`p-2.5 rounded-xl border transition-all ${
-                    isCurrentlySilent
+                    !isLiveMonitoring
+                      ? 'bg-slate-950/80 border-slate-800 text-slate-400'
+                      : isCurrentlySilent
                       ? 'bg-amber-950/40 border-amber-500/60 text-amber-200 shadow-md shadow-amber-500/10'
                       : 'bg-slate-950/80 border-slate-800 text-slate-300'
                   }`}
                 >
                   <div className="text-[10px] font-medium flex items-center justify-between">
                     <span>Detección de Silencio</span>
-                    {isCurrentlySilent ? (
+                    {!isLiveMonitoring ? (
+                      <VolumeX className="w-3.5 h-3.5 text-slate-500" />
+                    ) : isCurrentlySilent ? (
                       <VolumeX className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                     ) : (
                       <Volume2 className="w-3.5 h-3.5 text-slate-500" />
                     )}
                   </div>
                   <div className="text-base font-bold mt-1 flex items-center gap-1.5">
-                    {isCurrentlySilent ? (
+                    {!isLiveMonitoring ? (
+                      <span className="text-slate-400 text-sm font-semibold">
+                        En espera
+                      </span>
+                    ) : isCurrentlySilent ? (
                       <span className="text-amber-400 flex items-center gap-1 text-sm font-black animate-pulse">
                         <AlertTriangle className="w-4 h-4 shrink-0" />
                         Silencio Activo
@@ -952,14 +969,20 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                     )}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    {isCurrentlySilent ? 'Sin audio registrado' : 'Voz o ambiente presente'}
+                    {!isLiveMonitoring
+                      ? 'Sin conexión activa'
+                      : isCurrentlySilent
+                      ? 'Sin audio registrado'
+                      : 'Voz o ambiente presente'}
                   </div>
                 </div>
 
                 {/* Clipping Indicator */}
                 <div
                   className={`p-2.5 rounded-xl border transition-all ${
-                    isCurrentlyClipping
+                    !isLiveMonitoring
+                      ? 'bg-slate-950/80 border-slate-800 text-slate-400'
+                      : isCurrentlyClipping
                       ? 'bg-rose-950/60 border-rose-500 text-rose-100 shadow-lg shadow-rose-500/20'
                       : clippingEventsCount > 0
                       ? 'bg-rose-950/20 border-rose-500/30 text-rose-200'
@@ -970,7 +993,9 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                     <span>Saturación (Clipping)</span>
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
-                        isCurrentlyClipping
+                        !isLiveMonitoring
+                          ? 'bg-slate-700'
+                          : isCurrentlyClipping
                           ? 'bg-rose-500 animate-ping'
                           : clippingEventsCount > 0
                           ? 'bg-rose-500/60'
@@ -979,7 +1004,11 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                     />
                   </div>
                   <div className="text-base font-bold mt-1">
-                    {isCurrentlyClipping ? (
+                    {!isLiveMonitoring ? (
+                      <span className="text-slate-400 text-sm font-semibold">
+                        Sin señal
+                      </span>
+                    ) : isCurrentlyClipping ? (
                       <span className="text-rose-400 text-sm font-black flex items-center gap-1 animate-bounce">
                         ¡SATURANDO!
                       </span>
@@ -994,7 +1023,9 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
                     )}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    {clippingEventsCount > 0
+                    {!isLiveMonitoring
+                      ? 'Conecta el micrófono primero'
+                      : clippingEventsCount > 0
                       ? 'Límite digital excedido'
                       : 'Rango dinámico limpio'}
                   </div>
