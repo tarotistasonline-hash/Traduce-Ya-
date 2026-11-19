@@ -78,6 +78,10 @@
           return true;
         }
       }, true);
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__deferredPWAInstallPrompt = e;
+      });
     </script>
   </head>
   <body translate="no" class="notranslate">

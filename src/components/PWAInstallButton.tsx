@@ -90,6 +90,31 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
             </div>
 
             <div className="space-y-3 text-sm text-slate-300">
+              {(() => {
+                let inFrame = false;
+                try {
+                  inFrame = typeof window !== 'undefined' && window.self !== window.top;
+                } catch {
+                  inFrame = true;
+                }
+                if (!inFrame) return null;
+                return (
+                  <div className="p-3 rounded-xl bg-cyan-950/70 border border-cyan-500/40 space-y-2">
+                    <p className="text-xs text-cyan-100 leading-snug">
+                      Estás dentro de una vista previa integrada (como AI Studio o WhatsApp). Para poder instalarla, primero ábrela directo en Chrome/Safari:
+                    </p>
+                    <a
+                      href={typeof window !== 'undefined' ? window.location.href : '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition"
+                    >
+                      Abrir en Chrome / pestaña nueva
+                    </a>
+                  </div>
+                );
+              })()}
+
               <div className="flex items-start gap-3 p-3 rounded-xl bg-slate-800/70 border border-slate-700/50">
                 <div className="w-7 h-7 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs shrink-0">
                   1
@@ -120,10 +145,10 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                 </div>
                 <div>
                   <p className="font-medium text-slate-100">
-                    Selecciona <strong>&quot;Instalar aplicación&quot;</strong> o <strong>&quot;Añadir a pantalla de inicio&quot;</strong>
+                    Selecciona <strong>&quot;Añadir a pantalla de inicio&quot;</strong> o <strong>&quot;Instalar aplicación&quot;</strong>
                   </p>
                   <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                    <PlusSquare className="w-3.5 h-3.5 text-emerald-400 inline" /> Se creará el ícono directo en tu teléfono.
+                    <PlusSquare className="w-3.5 h-3.5 text-emerald-400 inline" /> Si ya la habías instalado o desinstalado antes, esta opción manual siempre funciona.
                   </p>
                 </div>
               </div>
