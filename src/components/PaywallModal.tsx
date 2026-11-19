@@ -19,7 +19,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import {
-  DAILY_FREE_LIMIT,
+  FREE_TRIAL_LIMIT,
   activateWithCode,
   setProUser,
   setCreatorUser,
@@ -68,7 +68,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
 
   if (!isOpen) return null;
 
-  const freeRemaining = Math.max(0, DAILY_FREE_LIMIT - usedToday);
+  const freeRemaining = Math.max(0, FREE_TRIAL_LIMIT - usedToday);
   const isLimitReached = freeRemaining === 0;
   const isOwner = isCreatorUser();
 
@@ -198,16 +198,16 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           {isLimitReached ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Límite gratuito diario completado
+              Prueba gratuita completada
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               <Gift className="w-3.5 h-3.5 text-emerald-400" />
-              {freeRemaining} de {DAILY_FREE_LIMIT} frases gratis hoy
+              {freeRemaining} de {FREE_TRIAL_LIMIT} frases gratis disponibles
             </span>
           )}
           <span className="text-xs text-slate-400 font-mono">
-            {usedToday} / {DAILY_FREE_LIMIT} usadas
+            {usedToday} / {FREE_TRIAL_LIMIT} usadas
           </span>
         </div>
 
@@ -219,7 +219,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             </>
           ) : (
             <>
-              ¡Tienes <span className="text-emerald-400">{DAILY_FREE_LIMIT} frases gratis</span>!
+              ¡Tienes <span className="text-emerald-400">{FREE_TRIAL_LIMIT} frases gratis</span> de prueba!
             </>
           )}
         </h2>
@@ -450,7 +450,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             className="w-full py-2.5 px-4 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition"
           >
             <Gift className="w-4 h-4" />
-            <span>Seguir probando gratis ({freeRemaining} disponibles hoy)</span>
+            <span>Seguir probando gratis ({freeRemaining} restantes)</span>
           </button>
         )}
 
@@ -513,7 +513,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
         <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
           <span className="flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Cupo gratuito diario renovable</span>
+            <span>Prueba gratuita única de {FREE_TRIAL_LIMIT} frases</span>
           </span>
 
           <button

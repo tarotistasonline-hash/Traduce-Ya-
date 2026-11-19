@@ -1,10 +1,12 @@
 // License and usage quota manager for Traduce Ya
 
-export const DAILY_FREE_LIMIT = 15;
+export const FREE_TRIAL_LIMIT = 15;
+export const DAILY_FREE_LIMIT = FREE_TRIAL_LIMIT;
 
 const STORAGE_KEY_PRO = 'traductor_ya_pro_v1';
 const STORAGE_KEY_CREATOR = 'traductor_ya_creator_mode_v1';
-const STORAGE_KEY_USAGE = 'traductor_ya_daily_usage_v1';
+const STORAGE_KEY_TRIAL_USAGE = 'traductor_ya_trial_usage_v1';
+const LEGACY_STORAGE_KEY_USAGE = 'traductor_ya_daily_usage_v1';
 const STORAGE_KEY_PAYMENT_URL = 'traductor_ya_custom_payment_url';
 const STORAGE_KEY_PAYMENT_CONFIG = 'traductor_ya_payment_config_v1';
 
@@ -114,14 +116,27 @@ export function setProUser(status: boolean): void {
   }
 }
 
-export function getDailyUsage(): number {
+export function getFreeTrialUsage(): number {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_USAGE);
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw);
-    const today = getTodayDateString();
-    if (parsed.date === today && typeof parsed.count === 'number') {
-      return parsed.count;
+    const raw = localStorage.getItem(STORAGE_KEY_TRIAL_USAGE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.count === 'number' && parsed.count >= 0) {
+        return parsed.count;
+      }
+    }
+
+    // Migrate legacy daily counter so visitors who already used free phrases keep their usage
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY_USAGE);
+    if (legacyRaw) {
+      const legacyParsed = JSON.parse(legacyRaw);
+      if (typeof legacyParsed?.count === 'number' && legacyParsed.count > 0) {
+        localStorage.setItem(
+          STORAGE_KEY_TRIAL_USAGE,
+          JSON.stringify({ count: legacyParsed.count })
+        );
+        return legacyParsed.count;
+      }
     }
     return 0;
   } catch {
@@ -129,14 +144,13 @@ export function getDailyUsage(): number {
   }
 }
 
-export function incrementDailyUsage(): number {
+export function incrementFreeTrialUsage(): number {
   try {
-    const today = getTodayDateString();
-    const current = getDailyUsage();
+    const current = getFreeTrialUsage();
     const nextCount = current + 1;
     localStorage.setItem(
-      STORAGE_KEY_USAGE,
-      JSON.stringify({ date: today, count: nextCount })
+      STORAGE_KEY_TRIAL_USAGE,
+      JSON.stringify({ count: nextCount })
     );
     return nextCount;
   } catch {
@@ -144,15 +158,18 @@ export function incrementDailyUsage(): number {
   }
 }
 
+export const getDailyUsage = getFreeTrialUsage;
+export const incrementDailyUsage = incrementFreeTrialUsage;
+
 export function getRemainingTranslations(): number {
   if (isProUser()) return Infinity;
-  const used = getDailyUsage();
-  return Math.max(0, DAILY_FREE_LIMIT - used);
+  const used = getFreeTrialUsage();
+  return Math.max(0, FREE_TRIAL_LIMIT - used);
 }
 
 export function canPerformTranslation(): boolean {
   if (isProUser()) return true;
-  return getDailyUsage() < DAILY_FREE_LIMIT;
+  return getFreeTrialUsage() < FREE_TRIAL_LIMIT;
 }
 
 export function activateWithCode(rawCode: string): boolean {

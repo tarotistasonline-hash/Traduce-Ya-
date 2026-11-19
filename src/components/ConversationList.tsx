@@ -12,7 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { ConversationTurn, Language } from '../types/translator';
-import { DAILY_FREE_LIMIT } from '../utils/licenseManager';
+import { FREE_TRIAL_LIMIT } from '../utils/licenseManager';
 
 interface ConversationListProps {
   turns: ConversationTurn[];
@@ -102,7 +102,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             </p>
             {!isPro && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
-                <span>🎁 {DAILY_FREE_LIMIT} frases gratuitas de prueba al día · Sin costo por frase</span>
+                <span>🎁 {FREE_TRIAL_LIMIT} frases gratuitas de prueba · Pago único para uso ilimitado</span>
               </div>
             )}
           </div>

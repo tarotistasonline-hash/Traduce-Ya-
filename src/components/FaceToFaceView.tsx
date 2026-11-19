@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Language, ConversationTurn } from '../types/translator';
 import { AudioWaveform } from './AudioWaveform';
-import { DAILY_FREE_LIMIT } from '../utils/licenseManager';
+import { FREE_TRIAL_LIMIT } from '../utils/licenseManager';
 
 interface FaceToFaceViewProps {
   userLang: Language;
@@ -238,7 +238,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
                 {isPro
                   ? 'Pulsa el botón de abajo o activa "Manos Libres" para conversar sin límites.'
-                  : `🎁 Tienes ${DAILY_FREE_LIMIT} frases gratuitas de prueba al día. Pulsa para hablar sin costo.`}
+                  : `🎁 Tienes ${FREE_TRIAL_LIMIT} frases gratuitas de prueba (única vez). Pulsa para hablar sin costo.`}
               </p>
             </div>
           )}
@@ -445,7 +445,7 @@ export const FaceToFaceView: React.FC<FaceToFaceViewProps> = ({
               <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
                 {isPro
                   ? 'Pulsa el botón verde para hablar o usa "Manos Libres" en mesa.'
-                  : `🎁 Tienes ${DAILY_FREE_LIMIT} frases gratuitas de prueba al día. ¡No pagas por cada frase!`}
+                  : `🎁 Tienes ${FREE_TRIAL_LIMIT} frases gratuitas de prueba (única vez). ¡No pagas por cada frase!`}
               </p>
             </div>
           )}

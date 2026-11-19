@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
-import { isCreatorUser, setCreatorUser, DAILY_FREE_LIMIT } from '../utils/licenseManager';
+import { isCreatorUser, setCreatorUser, FREE_TRIAL_LIMIT } from '../utils/licenseManager';
 import { translateText } from '../services/geminiService';
 
 interface SettingsModalProps {
@@ -206,11 +206,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>Frases Gratuitas y Precios</span>
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-                {isPro ? 'Pase Ilimitado' : `${remainingQuota ?? DAILY_FREE_LIMIT} de ${DAILY_FREE_LIMIT} gratis`}
+                {isPro ? 'Pase Ilimitado' : `${remainingQuota ?? FREE_TRIAL_LIMIT} de ${FREE_TRIAL_LIMIT} gratis`}
               </span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por frase individual. Dispones de <strong>{DAILY_FREE_LIMIT} frases gratuitas diarias</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites diarios, puedes activar el Pase Ilimitado con un único pago de $5 USD (o equivalente en ARS).
+              <strong className="text-emerald-300">Aclaración:</strong> No se cobra por frase individual. Dispones de <strong>{FREE_TRIAL_LIMIT} frases gratuitas de prueba por única vez</strong> para probar el traductor. Si deseas hablar sin interrupciones ni límites, puedes activar el Pase Ilimitado con un único pago de $5 USD (o equivalente en ARS).
             </p>
             {onOpenPaywall && (
               <button

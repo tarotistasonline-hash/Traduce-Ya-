@@ -70,12 +70,12 @@ import {
   isProUser,
   isCreatorUser,
   setCreatorUser,
-  getDailyUsage,
-  incrementDailyUsage,
+  getFreeTrialUsage,
+  incrementFreeTrialUsage,
   getRemainingTranslations,
   canPerformTranslation,
   checkUrlAutoUnlock,
-  DAILY_FREE_LIMIT,
+  FREE_TRIAL_LIMIT,
 } from './utils/licenseManager';
 
 const STORAGE_KEY_TURNS = 'traductor_ya_turns_v1';
@@ -435,9 +435,9 @@ export default function App() {
 
         setTurns((prev) => [newTurn, ...prev]);
 
-        // Decrement daily free quota if not pro
+        // Decrement free trial quota if not pro
         if (!isPro) {
-          incrementDailyUsage();
+          incrementFreeTrialUsage();
           setRemainingQuota(getRemainingTranslations());
         }
 
@@ -587,9 +587,9 @@ export default function App() {
 
         setTurns((prev) => [newTurn, ...prev]);
 
-        // Decrement daily free quota if not pro
+        // Decrement free trial quota if not pro
         if (!isPro) {
-          incrementDailyUsage();
+          incrementFreeTrialUsage();
           setRemainingQuota(getRemainingTranslations());
         }
 
@@ -916,19 +916,19 @@ export default function App() {
               }`}
               title={
                 remainingQuota > 0
-                  ? `Tienes ${remainingQuota} de ${DAILY_FREE_LIMIT} frases gratuitas de prueba. Clic para ver detalles.`
-                  : `Completaste tus ${DAILY_FREE_LIMIT} frases gratis de hoy. Clic para activar Pase Ilimitado.`
+                  ? `Tienes ${remainingQuota} de ${FREE_TRIAL_LIMIT} frases gratuitas de prueba. Clic para ver detalles.`
+                  : `Completaste tus ${FREE_TRIAL_LIMIT} frases gratis de prueba. Clic para activar Pase Ilimitado.`
               }
             >
               {remainingQuota > 0 ? (
                 <>
                   <Gift className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                  <span>{remainingQuota} de {DAILY_FREE_LIMIT} frases gratis</span>
+                  <span>{remainingQuota} de {FREE_TRIAL_LIMIT} frases gratis</span>
                 </>
               ) : (
                 <>
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>0 de {DAILY_FREE_LIMIT} frases gratis</span>
+                  <span>0 de {FREE_TRIAL_LIMIT} frases gratis</span>
                 </>
               )}
             </button>
@@ -1053,7 +1053,7 @@ export default function App() {
               <Gift className="w-3.5 h-3.5 text-emerald-400" />
             </span>
             <span className="truncate text-[11px] sm:text-xs">
-              <strong className="text-emerald-300 font-bold">{DAILY_FREE_LIMIT} frases gratis al día:</strong> Pruébalo sin costo.{' '}
+              <strong className="text-emerald-300 font-bold">{FREE_TRIAL_LIMIT} frases gratis de prueba:</strong> Pruébalo sin costo.{' '}
               <span className="text-slate-300 hidden md:inline">¡No cobramos por cada frase!</span>
               <button
                 onClick={() => setIsPaywallOpen(true)}
@@ -1064,7 +1064,7 @@ export default function App() {
             </span>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 ml-2">
-            {remainingQuota} / {DAILY_FREE_LIMIT} disponibles
+            {remainingQuota} / {FREE_TRIAL_LIMIT} disponibles
           </span>
         </div>
       )}
@@ -1401,7 +1401,7 @@ export default function App() {
           });
           setTimeout(() => setStatusAlert(null), 6000);
         }}
-        usedToday={getDailyUsage()}
+        usedToday={getFreeTrialUsage()}
       />
     </div>
   );
