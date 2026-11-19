@@ -482,25 +482,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* AI Studio Voice Generator Toggle */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
                   Voz de IA ultra-realista
                 </div>
                 <div className="text-xs text-slate-400">
-                  Usa Gemini Flash Lite TTS para entonación humana natural.
+                  Entonación humana natural o para idiomas sin buena voz local.
                 </div>
               </div>
               <button
                 onClick={() => onUpdateSettings({ useAiVoice: !settings.useAiVoice })}
-                className={`w-12 h-6 flex items-center rounded-full p-1 transition duration-300 ${
+                className={`w-12 h-6 shrink-0 flex items-center rounded-full p-1 transition duration-300 ${
                   settings.useAiVoice ? 'bg-purple-500 justify-end' : 'bg-slate-700 justify-start'
                 }`}
               >
                 <div className="bg-white w-4 h-4 rounded-full shadow-md transform transition" />
               </button>
+            </div>
+            <div className="text-[11px] leading-snug text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2.5 py-1.5">
+              ⚠️ <span className="font-semibold">No la actives para conversar en tiempo real:</span> agrega ~1–2 s de espera por frase. Dejala apagada para máxima fluidez.
             </div>
 
             {settings.useAiVoice && (

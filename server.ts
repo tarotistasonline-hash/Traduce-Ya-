@@ -95,30 +95,12 @@ app.post('/api/translate', async (req, res) => {
       });
     }
 
-    const prompt = `You are a real-time conversational interpreter translating live spoken dialogue between two people.
-Source language request: ${fromLang || 'Auto-detect'}
-Target language request: ${toLang || 'Spanish'}
-Tone: ${tone} (e.g. natural, polite, casual)
-
-Spoken text to translate:
+    const startedAt = Date.now();
+    const prompt = `Real-time spoken interpreter (${tone}). Translate from ${fromLang || 'Auto-detect'} to ${toLang || 'Spanish'}:
 "${text}"
 
-Translate accurately and naturally as spoken conversation.
-Provide:
-1. "translatedText": The direct, natural spoken translation in the target language.
-2. "detectedLanguage": The detected language name in Spanish (e.g. "Inglés", "Español", "Francés", "Japonés").
-3. "phonetic": Phonetic pronunciation guide (e.g., Pinyin for Mandarin, Romaji for Japanese, or simple phonetic respelling for tricky sounds). If Latin alphabet and intuitive, give the accurate pronunciation or leave empty.
-4. "nuance": If there is a key cultural or colloquial nuance, explain briefly in 1 short sentence in the listener's language. Otherwise null.
-5. "alternatives": An array of 1 or 2 alternative natural ways to say it (e.g. more formal vs more colloquial).
-
-Respond ONLY with valid JSON in this schema:
-{
-  "translatedText": "string",
-  "detectedLanguage": "string",
-  "phonetic": "string",
-  "nuance": "string or null",
-  "alternatives": ["string"]
-}`;
+Return ONLY compact JSON:
+{"translatedText":"natural spoken translation","detectedLanguage":"Spanish name of source language (e.g. Español, Inglés)","phonetic":"phonetic hint if non-Latin else empty string","nuance":null,"alternatives":["1 brief natural alternative"]}`;
 
     let response;
     try {
@@ -128,9 +110,10 @@ Respond ONLY with valid JSON in this schema:
           contents: prompt,
           config: {
             responseMimeType: 'application/json',
+            temperature: 0.2,
           },
         }),
-        7500,
+        4200,
         'gemini-3.1-flash-lite translate'
       );
     } catch (primaryErr: any) {
@@ -142,24 +125,26 @@ Respond ONLY with valid JSON in this schema:
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
+              temperature: 0.2,
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          9000,
+          5200,
           'gemini-4-hydrogen translate'
         );
       } catch (fallbackErr: any) {
-        if (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) {
-          await new Promise((r) => setTimeout(r, 400));
+        if (
+          (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) &&
+          Date.now() - startedAt < 5200
+        ) {
+          await new Promise((r) => setTimeout(r, 250));
           response = await withTimeout(
             ai.models.generateContent({
               model: 'gemini-3.1-flash-lite',
               contents: prompt,
-              config: {
-                responseMimeType: 'application/json',
-              },
+              config: { responseMimeType: 'application/json', temperature: 0.2 },
             }),
-            7500,
+            3500,
             'gemini-3.1-flash-lite retry'
           );
         } else {
@@ -525,27 +510,10 @@ app.post('/api/translate-audio', async (req, res) => {
       },
     };
 
-    const promptText = `Listen carefully to this live spoken audio from a conversation.
-Target language: ${toLang || 'Spanish'}
-Source language hint: ${fromLang || 'Auto-detect'}
-
-CRITICAL RULE:
-- ONLY transcribe actual, clearly audible human speech present in the audio.
-- If the audio is silent, near-silent, or contains only background noise/static with no intelligible spoken words, you MUST return "" for both "transcribedText" and "translatedText".
-- NEVER invent, guess, or hallucinate sentences that are not actually spoken in the audio.
-
-Tasks:
-1. Transcribe verbatim what the speaker said in their original language (or "" if silent/no speech).
-2. Translate that speech into ${toLang || 'Spanish'} naturally and colloquially (or "" if silent/no speech).
-3. Provide phonetic pronunciation guide if helpful (otherwise "").
-
-Respond strictly with a JSON object:
-{
-  "transcribedText": "exact words spoken or empty string",
-  "detectedLanguage": "name of language spoken in Spanish",
-  "translatedText": "natural translation in target language or empty string",
-  "phonetic": "phonetic guide or empty string"
-}`;
+    const promptText = `Transcribe and translate spoken audio from ${fromLang || 'Auto-detect'} to ${toLang || 'Spanish'}.
+If silent or no clear human speech, return "" for transcribedText and translatedText. Never invent speech.
+Return ONLY compact JSON:
+{"transcribedText":"exact speech or empty","detectedLanguage":"language in Spanish","translatedText":"natural translation or empty","phonetic":""}`;
 
     let response: any = null;
     let lastError: any = null;
@@ -560,9 +528,10 @@ Respond strictly with a JSON object:
           },
           config: {
             responseMimeType: 'application/json',
+            temperature: 0.2,
           },
         }),
-        10000,
+        4800,
         'gemini-3.1-flash-lite audio'
       );
     } catch (primaryErr: any) {
@@ -579,34 +548,15 @@ Respond strictly with a JSON object:
             },
             config: {
               responseMimeType: 'application/json',
+              temperature: 0.2,
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          11000,
+          5800,
           'gemini-4-hydrogen audio'
         );
       } catch (fallbackErr: any) {
         lastError = fallbackErr;
-        if (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) {
-          try {
-            await new Promise((r) => setTimeout(r, 400));
-            response = await withTimeout(
-              ai.models.generateContent({
-                model: 'gemini-3.1-flash-lite',
-                contents: {
-                  parts: [audioPart, { text: promptText }],
-                },
-                config: {
-                  responseMimeType: 'application/json',
-                },
-              }),
-              10000,
-              'gemini-3.1-flash-lite audio retry'
-            );
-          } catch (retryErr: any) {
-            lastError = retryErr;
-          }
-        }
         if (!response) {
           console.warn('Audio translation models notice:', lastError?.message || lastError);
         }

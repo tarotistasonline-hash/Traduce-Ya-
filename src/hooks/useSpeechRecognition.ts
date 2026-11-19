@@ -35,7 +35,7 @@ export function useSpeechRecognition({
   onAudioRecorded,
   onEnd,
   onError,
-  silenceTimeoutMs = 1500,
+  silenceTimeoutMs = 1050,
   noiseFilter = true,
 }: UseSpeechRecognitionOptions) {
   const [isListening, setIsListening] = useState(false);
@@ -156,7 +156,7 @@ export function useSpeechRecognition({
       // Give MediaRecorder enough time on mobile to emit final dataavailable/onstop before tearing down streams
       setTimeout(() => {
         cleanupAudioStream();
-      }, 450);
+      }, 260);
     } else {
       cleanupAudioStream();
     }
@@ -296,7 +296,7 @@ export function useSpeechRecognition({
                     stopListening();
                     onEndRef.current?.();
                   }
-                }, 1700);
+                }, 1150);
               }
             }
 
