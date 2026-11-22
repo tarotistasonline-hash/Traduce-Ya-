@@ -1,4 +1,14 @@
 import { getApiEndpoint } from '../utils/apiConfig';
+import { getUserApiKey } from '../utils/licenseManager';
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const userKey = getUserApiKey();
+  if (userKey) {
+    headers['x-gemini-api-key'] = userKey;
+  }
+  return headers;
+}
 
 export interface TranslateResponse {
   translatedText: string;
@@ -77,7 +87,7 @@ export async function translateText(
         url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: requestBody,
         },
         15000
@@ -167,7 +177,7 @@ export async function translateAudioBlob(
         url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: payload,
         },
         20000
@@ -220,7 +230,7 @@ export async function generateAiSpeech(
       url,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ text, voiceName }),
       },
       6000

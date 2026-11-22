@@ -28,6 +28,8 @@ import {
   savePaymentConfig,
   PRIVATE_CUSTOMER_CODES,
   PaymentConfig,
+  getUserApiKey,
+  setUserApiKey,
 } from '../utils/licenseManager';
 import { getApiEndpoint } from '../utils/apiConfig';
 
@@ -61,6 +63,11 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   const [showCodeBox, setShowCodeBox] = useState(false);
   const [code, setCode] = useState('');
   const [codeError, setCodeError] = useState('');
+
+  // Custom API key visitor input toggle
+  const [showApiKeyBox, setShowApiKeyBox] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(getUserApiKey());
+  const [apiKeySavedMsg, setApiKeySavedMsg] = useState(false);
 
   // Owner config drawer
   const [showConfigLink, setShowConfigLink] = useState(false);
@@ -504,6 +511,70 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 >
                   Activar Modo Creador (Ilimitado)
                 </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Custom API Key Collapsible for visitors */}
+        <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2.5">
+          <button
+            type="button"
+            onClick={() => setShowApiKeyBox(!showApiKeyBox)}
+            className="w-full text-center text-xs text-indigo-300 hover:text-indigo-200 transition flex items-center justify-center gap-1.5 font-semibold"
+          >
+            <Key className="w-3.5 h-3.5 text-indigo-400" />
+            <span>¿Tienes tu propia clave gratuita de Gemini (Google AI Studio)?</span>
+          </button>
+
+          {showApiKeyBox && (
+            <div className="space-y-2.5 p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 animate-fade-in text-xs">
+              <p className="text-slate-300">
+                Ingresa tu propia API Key para tener traducciones ilimitadas sin costo y sin consumir la cuota pública de la app.
+              </p>
+              <div className="space-y-2">
+                <input
+                  type="password"
+                  placeholder="AIzaSy..."
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-indigo-500/40 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400 font-mono"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserApiKey(apiKeyInput);
+                      setApiKeySavedMsg(true);
+                      setTimeout(() => {
+                        setApiKeySavedMsg(false);
+                        onActivated();
+                        onClose();
+                      }, 1500);
+                    }}
+                    className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition"
+                  >
+                    Usar mi clave (Ilimitado)
+                  </button>
+                  {getUserApiKey() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUserApiKey('');
+                        setApiKeyInput('');
+                        setApiKeySavedMsg(false);
+                      }}
+                      className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 font-medium transition"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+                {apiKeySavedMsg && (
+                  <p className="text-[11px] text-emerald-400 font-medium text-center">
+                    ✅ ¡Clave aplicada! Pase ilimitado activado con tu API Key.
+                  </p>
+                )}
               </div>
             </div>
           )}

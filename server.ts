@@ -22,7 +22,23 @@ const VISITOR_STATS_FILE = path.join(__dirname, 'visitor_stats.json');
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 
-function getAiClient(): GoogleGenAI | null {
+function getAiClient(req?: express.Request): GoogleGenAI | null {
+  const customKey = (
+    (typeof req?.headers?.['x-gemini-api-key'] === 'string' ? req.headers['x-gemini-api-key'] : '') ||
+    (typeof req?.body?.userApiKey === 'string' ? req.body.userApiKey : '')
+  ).trim();
+
+  if (customKey) {
+    return new GoogleGenAI({
+      apiKey: customKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+
   const currentKey = process.env.GEMINI_API_KEY;
   if (!currentKey) return null;
 
@@ -88,7 +104,7 @@ app.post('/api/translate', async (req, res) => {
       return res.status(400).json({ error: 'Text is required for translation.' });
     }
 
-    const ai = getAiClient();
+    const ai = getAiClient(req);
     if (!ai) {
       return res.status(503).json({
         error: 'Servicio de IA no disponible en el servidor.',
@@ -496,7 +512,7 @@ app.post('/api/translate-audio', async (req, res) => {
       return res.status(400).json({ error: 'Audio data is required.' });
     }
 
-    const ai = getAiClient();
+    const ai = getAiClient(req);
     if (!ai) {
       return res.status(503).json({
         error: 'Servicio de IA no disponible en el servidor.',
@@ -633,7 +649,7 @@ app.post('/api/tts', async (req, res) => {
       return res.status(400).json({ error: 'Text is required for TTS.' });
     }
 
-    const ai = getAiClient();
+    const ai = getAiClient(req);
     if (!ai) {
       return res.json({ audioBase64: null });
     }

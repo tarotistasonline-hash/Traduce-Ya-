@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
-import { isCreatorUser, setCreatorUser, FREE_TRIAL_LIMIT } from '../utils/licenseManager';
+import { isCreatorUser, setCreatorUser, FREE_TRIAL_LIMIT, getUserApiKey, setUserApiKey } from '../utils/licenseManager';
 import { translateText } from '../services/geminiService';
 
 interface SettingsModalProps {
@@ -74,6 +74,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   visitorStats,
 }) => {
   const [isCreator, setIsCreator] = useState(isCreatorUser);
+  const [userApiKeyInput, setUserApiKeyInput] = useState(getUserApiKey());
+  const [savedApiKeyMsg, setSavedApiKeyMsg] = useState(false);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [testApiResult, setTestApiResult] = useState<{
@@ -225,6 +227,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
             )}
+          </div>
+
+          {/* Custom User Gemini API Key Card */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-950/40 via-slate-900 to-slate-800 border border-indigo-500/30 shadow-md space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span className="flex items-center gap-1.5 text-indigo-300">
+                <Key className="w-4 h-4 text-indigo-400" />
+                <span>Usa tu propia API Key de Gemini (Gratis)</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold">
+                Ilimitado
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Si tienes tu propia clave gratuita de Google AI Studio, ingrésala aquí para tener <strong>traducciones ilimitadas con tu propia cuota</strong> sin agotar la clave pública de la app.
+            </p>
+            <div className="space-y-2">
+              <input
+                type="password"
+                placeholder="AIzaSy..."
+                value={userApiKeyInput}
+                onChange={(e) => setUserApiKeyInput(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserApiKey(userApiKeyInput);
+                    setSavedApiKeyMsg(true);
+                    setTimeout(() => setSavedApiKeyMsg(false), 3000);
+                  }}
+                  className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-sm"
+                >
+                  Guardar y usar mi clave
+                </button>
+                {getUserApiKey() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserApiKey('');
+                      setUserApiKeyInput('');
+                      setSavedApiKeyMsg(false);
+                    }}
+                    className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-medium transition"
+                  >
+                    Borrar
+                  </button>
+                )}
+              </div>
+              {savedApiKeyMsg && (
+                <p className="text-[11px] text-emerald-400 font-medium text-center">
+                  ✅ ¡Clave guardada! Traducciones ilimitadas activadas en este dispositivo.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Contador de Visitas Reales */}

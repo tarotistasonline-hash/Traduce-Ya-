@@ -23,7 +23,16 @@ app.use((req, _res, next) => {
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 
-function getAiClient(): GoogleGenAI | null {
+function getAiClient(req?: express.Request): GoogleGenAI | null {
+  const customKey = (
+    (typeof req?.headers?.['x-gemini-api-key'] === 'string' ? req.headers['x-gemini-api-key'] : '') ||
+    (typeof req?.body?.userApiKey === 'string' ? req.body.userApiKey : '')
+  ).trim();
+
+  if (customKey) {
+    return new GoogleGenAI({ apiKey: customKey });
+  }
+
   const currentKey = process.env.GEMINI_API_KEY?.trim();
   if (!currentKey) return null;
 
@@ -100,7 +109,7 @@ app.get('/api/status', (_req, res) => {
 });
 
 app.post('/api/translate', async (req, res) => {
-  const ai = getAiClient();
+  const ai = getAiClient(req);
   if (!ai) {
     return proxyToFallbackOrigin(req, res);
   }
@@ -194,7 +203,7 @@ Return ONLY compact JSON:
 });
 
 app.post('/api/translate-audio', async (req, res) => {
-  const ai = getAiClient();
+  const ai = getAiClient(req);
   if (!ai) {
     return proxyToFallbackOrigin(req, res);
   }
@@ -301,7 +310,7 @@ Return ONLY compact JSON:
 });
 
 app.post('/api/tts', async (req, res) => {
-  const ai = getAiClient();
+  const ai = getAiClient(req);
   if (!ai) {
     return proxyToFallbackOrigin(req, res);
   }

@@ -95,8 +95,33 @@ export function setCreatorUser(status: boolean): void {
   }
 }
 
+const STORAGE_KEY_USER_API_KEY = 'traductor_ya_user_api_key_v1';
+
+export function getUserApiKey(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return localStorage.getItem(STORAGE_KEY_USER_API_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setUserApiKey(key: string): void {
+  try {
+    const clean = key.trim();
+    if (clean) {
+      localStorage.setItem(STORAGE_KEY_USER_API_KEY, clean);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_USER_API_KEY);
+    }
+  } catch (e) {
+    console.warn('Failed to save user API key:', e);
+  }
+}
+
 export function isProUser(): boolean {
   if (isCreatorUser()) return true;
+  if (getUserApiKey()) return true;
   try {
     return localStorage.getItem(STORAGE_KEY_PRO) === 'true';
   } catch {
@@ -110,6 +135,7 @@ export function setProUser(status: boolean): void {
       localStorage.setItem(STORAGE_KEY_PRO, 'true');
     } else {
       localStorage.removeItem(STORAGE_KEY_PRO);
+      // Do not clear user api key unless explicitly requested, but pro status can toggle
     }
   } catch (e) {
     console.warn('Failed to save pro status:', e);
