@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { getApiEndpoint } from '../utils/apiConfig';
+import { getAdminToken } from '../utils/licenseManager';
 
 export interface FeedbackItem {
   id: string;
@@ -36,19 +37,33 @@ export const FeedbackViewerModal: React.FC<FeedbackViewerModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const fetchItems = async () => {
+    const token = getAdminToken();
+    if (!token) {
+      setItems([]);
+      setError('Inicia sesión como administradora en Ajustes para ver el buzón privado.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     try {
       const endpoint = getApiEndpoint('/api/feedback');
-      const res = await fetch(endpoint);
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.items)) {
+      const res = await fetch(endpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setItems([]);
+        setError('Sesión de administradora requerida o expirada. Vuelve a iniciar sesión en Ajustes.');
+      } else if (res.ok && Array.isArray(data.items)) {
         setItems(data.items);
       } else {
-        setError('No se pudieron cargar los mensajes.');
+        setError(data?.error || 'No se pudieron cargar los mensajes.');
       }
     } catch (e: any) {
-      setError(e.message || 'Error de conexión');
+      setError(e?.message || 'Error de conexión');
     } finally {
       setIsLoading(false);
     }

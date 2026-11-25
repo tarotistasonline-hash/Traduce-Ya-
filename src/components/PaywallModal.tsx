@@ -17,21 +17,31 @@ import {
   CreditCard,
   Receipt,
   CheckCircle2,
+  Lock,
+  Plus,
 } from 'lucide-react';
+import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 import {
   FREE_TRIAL_LIMIT,
-  activateWithCode,
-  setProUser,
-  setCreatorUser,
-  isCreatorUser,
+  activateLicenseCode,
+  setProSessionToken,
+  isAdminAuthenticated,
+  fetchAdminStatus,
+  claimAdminPasscode,
+  loginAdminWithPasscode,
+  loginAdminWithFirebase,
+  generateCustomerCode,
+  fetchCustomerCodes,
   getPaymentConfig,
   savePaymentConfig,
-  PRIVATE_CUSTOMER_CODES,
   PaymentConfig,
+  AdminStatusResponse,
   getUserApiKey,
   setUserApiKey,
 } from '../utils/licenseManager';
 import { getApiEndpoint } from '../utils/apiConfig';
+import { isValidHttpUrl, sanitizeEmail, sanitizeExternalUrl } from '../utils/urlSecurity';
 
 interface PaywallModalProps {
   isOpen: boolean;
@@ -62,25 +72,65 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   // Optional private code fallback toggle
   const [showCodeBox, setShowCodeBox] = useState(false);
   const [code, setCode] = useState('');
+  const [isApplyingCode, setIsApplyingCode] = useState(false);
   const [codeError, setCodeError] = useState('');
+
+  // Verified Admin auth state
+  const [isOwner, setIsOwner] = useState(isAdminAuthenticated);
+  const [adminStatus, setAdminStatus] = useState<AdminStatusResponse | null>(null);
+  const [adminPasscode, setAdminPasscode] = useState('');
+  const [isAdminLoading, setIsAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   // Custom API key visitor input toggle
   const [showApiKeyBox, setShowApiKeyBox] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(getUserApiKey());
   const [apiKeySavedMsg, setApiKeySavedMsg] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState('');
 
   // Owner config drawer
   const [showConfigLink, setShowConfigLink] = useState(false);
   const [linkSavedMsg, setLinkSavedMsg] = useState(false);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setIsOwner(isAdminAuthenticated());
+    fetchAdminStatus().then((status) => {
+      if (!active) return;
+      setAdminStatus(status);
+      setIsOwner(status.isAuthenticated);
+      if (status.isAuthenticated) {
+        fetchCustomerCodes().then((res) => {
+          if (active && res.ok && res.codes) {
+            setGeneratedCodes(res.codes);
+          }
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const freeRemaining = Math.max(0, FREE_TRIAL_LIMIT - usedToday);
   const isLimitReached = freeRemaining === 0;
-  const isOwner = isCreatorUser();
 
-  const isPaypalLink = paymentConfig.paypalAccount.trim().startsWith('http');
-  const isArsLink = paymentConfig.arsTarget.trim().startsWith('http');
+  const safeArsHref = isValidHttpUrl(paymentConfig.arsTarget)
+    ? sanitizeExternalUrl(paymentConfig.arsTarget, '#')
+    : '#';
+  const isArsLink = safeArsHref !== '#';
+
+  const safePaypalHref = isValidHttpUrl(paymentConfig.paypalAccount)
+    ? sanitizeExternalUrl(paymentConfig.paypalAccount, '#')
+    : '#';
+  const isPaypalLink = safePaypalHref !== '#';
+
+  const safeContactEmail = sanitizeEmail(paymentConfig.contactEmail);
 
   const handleCopy = (value: string, field: string) => {
     navigator.clipboard?.writeText(value);
@@ -116,8 +166,8 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
 
       const data = await res.json().catch(() => ({}));
 
-      if (res.ok && data.verified) {
-        setProUser(true);
+      if (res.ok && data.verified && typeof data.proToken === 'string') {
+        setProSessionToken(data.proToken);
         setVerifyFeedback({
           type: 'success',
           text: data.message || '¡Pago verificado! Pase Ilimitado activado.',
@@ -134,7 +184,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           type: 'pending',
           text:
             data.message ||
-            `¡Registramos tu número de operación (#${cleaned})! Envíanos este comprobante a ${paymentConfig.contactEmail} y te responderemos enseguida con tu código de activación.`,
+            `¡Registramos tu número de operación (#${cleaned})! Envíanos este comprobante a ${safeContactEmail} y te responderemos enseguida con tu código de activación.`,
         });
         setOperationId('');
         return;
@@ -143,7 +193,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       if (res.status >= 500) {
         setVerifyFeedback({
           type: 'pending',
-          text: `Recibimos tu número de operación (#${cleaned}). Por favor envíanoslo por correo a ${paymentConfig.contactEmail} para confirmarlo en Mercado Pago y enviarte tu código de activación.`,
+          text: `Recibimos tu número de operación (#${cleaned}). Por favor envíanoslo por correo a ${safeContactEmail} para confirmarlo en Mercado Pago y enviarte tu código de activación.`,
         });
         return;
       }
@@ -155,14 +205,14 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
     } catch {
       setVerifyFeedback({
         type: 'pending',
-        text: `Para activar tu pase enseguida, envíanos tu número de operación (#${cleaned}) a ${paymentConfig.contactEmail}.`,
+        text: `Para activar tu pase enseguida, envíanos tu número de operación (#${cleaned}) a ${safeContactEmail}.`,
       });
     } finally {
       setIsVerifyingOp(false);
     }
   };
 
-  const handleApplyCode = (e: React.FormEvent) => {
+  const handleApplyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setCodeError('');
 
@@ -171,12 +221,86 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
       return;
     }
 
-    const success = activateWithCode(code);
-    if (success) {
-      onActivated();
-      onClose();
-    } else {
-      setCodeError('Código no válido. Verifica que esté bien escrito.');
+    setIsApplyingCode(true);
+    try {
+      const result = await activateLicenseCode(code);
+      if (result.ok) {
+        if (result.role === 'admin') {
+          setIsOwner(true);
+        }
+        onActivated();
+        onClose();
+      } else {
+        setCodeError(result.error || 'Código no válido. Verifica que esté bien escrito.');
+      }
+    } finally {
+      setIsApplyingCode(false);
+    }
+  };
+
+  const handleGoogleAdminLogin = async () => {
+    setIsAdminLoading(true);
+    setAdminError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const cred = await signInWithPopup(auth, provider);
+      const idToken = await cred.user.getIdToken();
+      const res = await loginAdminWithFirebase(idToken);
+      if (res.ok) {
+        setIsOwner(true);
+        onActivated();
+        onClose();
+      } else {
+        await signOut(auth).catch(() => {});
+        setAdminError(res.error || 'Cuenta no autorizada.');
+      }
+    } catch (err: any) {
+      setAdminError(
+        err?.code === 'auth/popup-closed-by-user'
+          ? 'Se cerró la ventana de Google.'
+          : 'No se pudo iniciar sesión con Google.'
+      );
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleAdminPasscodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError('');
+    if (!adminPasscode.trim()) {
+      setAdminError('Ingresa la contraseña de administradora.');
+      return;
+    }
+    setIsAdminLoading(true);
+    try {
+      const res = adminStatus?.needsSetup
+        ? await claimAdminPasscode(adminPasscode)
+        : await loginAdminWithPasscode(adminPasscode);
+      if (res.ok) {
+        setIsOwner(true);
+        setAdminPasscode('');
+        onActivated();
+        onClose();
+      } else {
+        setAdminError(res.error || 'Contraseña incorrecta.');
+      }
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleGenerateCode = async () => {
+    setIsGeneratingCode(true);
+    try {
+      const res = await generateCustomerCode();
+      if (res.ok && res.code) {
+        setGeneratedCodes((prev) => res.codes || [res.code!, ...prev]);
+        handleCopy(res.code, res.code);
+      }
+    } finally {
+      setIsGeneratingCode(false);
     }
   };
 
@@ -290,7 +414,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
               {paymentConfig.arsTarget && (
                 isArsLink ? (
                   <a
-                    href={paymentConfig.arsTarget}
+                    href={safeArsHref}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0 transition shadow-md shadow-cyan-500/20"
@@ -331,7 +455,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 </div>
                 {isPaypalLink ? (
                   <a
-                    href={paymentConfig.paypalAccount}
+                    href={safePaypalHref}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
@@ -406,9 +530,9 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 )}
               </button>
               <a
-                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
+                href={`mailto:${safeContactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
                 className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1 shrink-0"
-                title={`Enviar comprobante a ${paymentConfig.contactEmail}`}
+                title={`Enviar comprobante a ${safeContactEmail}`}
               >
                 <Mail className="w-3.5 h-3.5 text-cyan-400" />
               </a>
@@ -427,11 +551,11 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 <p>{verifyFeedback.text}</p>
                 {verifyFeedback.type === 'pending' && (
                   <a
-                    href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent(`Comprobante Traduce Ya PRO - Op #${submittedOpId || operationId}`)}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado.\nNúmero de operación de Mercado Pago: ${submittedOpId || operationId || '[pegar número]'}\nMi contacto para recibir el código: ${payerContact || '(responder a este correo)'}`)}`}
+                    href={`mailto:${safeContactEmail}?subject=${encodeURIComponent(`Comprobante Traduce Ya PRO - Op #${submittedOpId || operationId}`)}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado.\nNúmero de operación de Mercado Pago: ${submittedOpId || operationId || '[pegar número]'}\nMi contacto para recibir el código: ${payerContact || '(responder a este correo)'}`)}`}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"
                   >
                     <Mail className="w-3.5 h-3.5" />
-                    <span>Enviar comprobante a {paymentConfig.contactEmail}</span>
+                    <span>Enviar comprobante a {safeContactEmail}</span>
                   </a>
                 )}
               </div>
@@ -440,10 +564,10 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             <p className="text-[10px] text-slate-400 leading-snug">
               ¿Ya pagaste? Envía el número de operación a{' '}
               <a
-                href={`mailto:${paymentConfig.contactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
+                href={`mailto:${safeContactEmail}?subject=${encodeURIComponent('Comprobante Traduce Ya PRO')}&body=${encodeURIComponent(`Hola, acabo de abonar el Pase Ilimitado. Mi número de operación de Mercado Pago es: ${operationId || submittedOpId || '[pegar número]'}. Mi contacto: ${payerContact}`)}`}
                 className="text-cyan-300 underline hover:text-white"
               >
-                {paymentConfig.contactEmail}
+                {safeContactEmail}
               </a>{' '}
               para recibir tu código de activación.
             </p>
@@ -485,9 +609,10 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors"
+                    disabled={isApplyingCode}
+                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors disabled:opacity-50"
                   >
-                    Activar
+                    {isApplyingCode ? 'Validando...' : 'Activar'}
                   </button>
                 </div>
                 {codeError && (
@@ -495,22 +620,58 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 )}
               </form>
 
-              <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/30 text-center space-y-1.5">
+              <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/30 space-y-2">
                 <p className="text-xs text-amber-300 font-semibold flex items-center justify-center gap-1.5">
-                  <span>👑</span>
-                  <span>Modo Creadora / Administradora</span>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Acceso Verificado Administradora</span>
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreatorUser(true);
-                    onActivated();
-                    onClose();
-                  }}
-                  className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 text-xs font-bold border border-amber-500/40 transition-all"
-                >
-                  Activar Modo Creador (Ilimitado)
-                </button>
+
+                {isOwner ? (
+                  <p className="text-[11px] text-emerald-300 text-center font-medium">
+                    ✓ Sesión verificada como administradora activa.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      disabled={isAdminLoading}
+                      onClick={handleGoogleAdminLogin}
+                      className="w-full py-2 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
+                    >
+                      {isAdminLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      )}
+                      <span>Entrar con Google (tarotistasonline@gmail.com)</span>
+                    </button>
+
+                    <form onSubmit={handleAdminPasscodeSubmit} className="flex gap-1.5">
+                      <input
+                        type="password"
+                        value={adminPasscode}
+                        onChange={(e) => setAdminPasscode(e.target.value)}
+                        placeholder={
+                          adminStatus?.needsSetup
+                            ? 'Crear contraseña admin (8+ chars)'
+                            : 'Contraseña de administradora'
+                        }
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isAdminLoading}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition disabled:opacity-50 shrink-0"
+                      >
+                        {adminStatus?.needsSetup ? 'Configurar' : 'Entrar'}
+                      </button>
+                    </form>
+
+                    {adminError && (
+                      <p className="text-[11px] text-rose-400 text-center">{adminError}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -544,13 +705,19 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setUserApiKey(apiKeyInput);
+                      const res = setUserApiKey(apiKeyInput);
+                      if (!res.ok) {
+                        setApiKeyError(res.error || 'Formato inválido de API Key.');
+                        setApiKeySavedMsg(false);
+                        return;
+                      }
+                      setApiKeyError('');
                       setApiKeySavedMsg(true);
                       setTimeout(() => {
                         setApiKeySavedMsg(false);
                         onActivated();
                         onClose();
-                      }, 1500);
+                      }, 1000);
                     }}
                     className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition"
                   >
@@ -562,6 +729,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                       onClick={() => {
                         setUserApiKey('');
                         setApiKeyInput('');
+                        setApiKeyError('');
                         setApiKeySavedMsg(false);
                       }}
                       className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 font-medium transition"
@@ -570,6 +738,11 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                     </button>
                   )}
                 </div>
+                {apiKeyError && (
+                  <p className="text-[11px] text-rose-400 font-medium text-center">
+                    {apiKeyError}
+                  </p>
+                )}
                 {apiKeySavedMsg && (
                   <p className="text-[11px] text-emerald-400 font-medium text-center">
                     ✅ ¡Clave aplicada! Pase ilimitado activado con tu API Key.
@@ -580,29 +753,31 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
           )}
         </div>
 
-        {/* Footer info & owner link config toggle */}
+        {/* Footer info & verified owner config toggle */}
         <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
           <span className="flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>Prueba gratuita única de {FREE_TRIAL_LIMIT} frases</span>
           </span>
 
-          <button
-            type="button"
-            onClick={() => setShowConfigLink(!showConfigLink)}
-            className="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors"
-            title="Configurar datos de cobro (Dueño)"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Datos de cobro</span>
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => setShowConfigLink(!showConfigLink)}
+              className="flex items-center gap-1 text-amber-300 hover:text-amber-200 transition-colors"
+              title="Configurar datos de cobro y códigos (Administradora)"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Panel Administradora</span>
+            </button>
+          )}
         </div>
 
-        {/* Owner Settings drawer */}
-        {showConfigLink && (
+        {/* Verified Owner Settings drawer */}
+        {isOwner && showConfigLink && (
           <div className="mt-3 p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2.5 text-xs">
             <p className="font-semibold text-slate-200">
-              🛠️ Configuración de Cobro (Vista previa en este dispositivo):
+              🛠️ Configuración de Cobro (Administradora):
             </p>
             <form onSubmit={handleSaveConfig} className="space-y-2">
               <div>
@@ -645,26 +820,38 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
               <p className="text-emerald-400 text-xs">¡Datos guardados en este dispositivo!</p>
             )}
 
-            {isOwner && (
-              <div className="pt-2 border-t border-slate-800 space-y-1">
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
                 <p className="text-[11px] font-bold text-amber-300">
-                  🔑 Códigos privados de respaldo (para activar manualmente):
+                  🔑 Generar código único para comprador:
                 </p>
+                <button
+                  type="button"
+                  disabled={isGeneratingCode}
+                  onClick={handleGenerateCode}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 transition disabled:opacity-50"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>{isGeneratingCode ? 'Generando...' : 'Nuevo código'}</span>
+                </button>
+              </div>
+
+              {generatedCodes.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {PRIVATE_CUSTOMER_CODES.map((c) => (
+                  {generatedCodes.slice(0, 8).map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => handleCopy(c, c)}
                       className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-amber-500/30 font-mono text-[10px] text-amber-200"
-                      title="Copiar código"
+                      title="Copiar código generado"
                     >
                       {copiedField === c ? '✓ Copiado' : c}
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>

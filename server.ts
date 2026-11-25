@@ -4,6 +4,27 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import {
+  ADMIN_EMAIL,
+  checkRateLimit,
+  constantTimeEqual,
+  generateSignedCustomerCode,
+  getClientIp,
+  getEnvCustomerCodes,
+  getFirebaseWebApiKey,
+  hashPasscodeScrypt,
+  isVerifiedAdminRequest,
+  isVerifiedProOrAdminRequest,
+  sameOriginGuard,
+  securityHeadersMiddleware,
+  signSessionToken,
+  validateAudioPayload,
+  validateCustomGeminiKey,
+  validateTranslateBody,
+  verifyFirebaseAdminIdToken,
+  verifyPasscodeScrypt,
+  verifySignedCustomerCode,
+} from './api/_security.ts';
 
 dotenv.config();
 
@@ -13,34 +34,56 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: '25mb' }));
+app.disable('x-powered-by');
+app.use(securityHeadersMiddleware);
+app.use(express.json({ limit: '8mb' }));
+
+// Enforce strict same-origin verification on state-changing requests and sensitive endpoints
+app.use('/api', (req, res, next) => {
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  const isSensitiveGet = req.path.startsWith('/admin') || req.path === '/feedback';
+  if (isMutation || isSensitiveGet) {
+    return sameOriginGuard(req, res, next);
+  }
+  return next();
+});
 
 // Stats file path on persistent filesystem
 const VISITOR_STATS_FILE = path.join(__dirname, 'visitor_stats.json');
+const ADMIN_AUTH_FILE = path.join(__dirname, 'admin_auth.json');
+const CUSTOMER_CODES_FILE = path.join(__dirname, 'customer_codes.json');
 
 // Initialize GoogleGenAI client
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 
-function getAiClient(req?: express.Request): GoogleGenAI | null {
-  const customKey = (
-    (typeof req?.headers?.['x-gemini-api-key'] === 'string' ? req.headers['x-gemini-api-key'] : '') ||
-    (typeof req?.body?.userApiKey === 'string' ? req.body.userApiKey : '')
-  ).trim();
-
-  if (customKey) {
-    return new GoogleGenAI({
-      apiKey: customKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+function resolveAiClient(req?: express.Request):
+  | { ok: true; ai: GoogleGenAI | null; usingCustomKey: boolean }
+  | { ok: false; error: string } {
+  const rawHeader = typeof req?.headers?.['x-gemini-api-key'] === 'string' ? req.headers['x-gemini-api-key'] : '';
+  const rawBody = typeof req?.body?.userApiKey === 'string' ? req.body.userApiKey : '';
+  const validated = validateCustomGeminiKey(rawHeader || rawBody);
+  if (!validated.ok) {
+    return { ok: false, error: validated.error };
   }
 
-  const currentKey = process.env.GEMINI_API_KEY;
-  if (!currentKey) return null;
+  if (validated.key) {
+    return {
+      ok: true,
+      ai: new GoogleGenAI({
+        apiKey: validated.key,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      }),
+      usingCustomKey: true,
+    };
+  }
+
+  const currentKey = process.env.GEMINI_API_KEY?.trim();
+  if (!currentKey) return { ok: true, ai: null, usingCustomKey: false };
 
   if (!aiClient || cachedApiKey !== currentKey) {
     cachedApiKey = currentKey;
@@ -53,7 +96,54 @@ function getAiClient(req?: express.Request): GoogleGenAI | null {
       },
     });
   }
-  return aiClient;
+  return { ok: true, ai: aiClient, usingCustomKey: false };
+}
+
+function readClaimedAdminHash(): string | null {
+  try {
+    if (fs.existsSync(ADMIN_AUTH_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(ADMIN_AUTH_FILE, 'utf8'));
+      if (typeof parsed?.passcodeHash === 'string' && parsed.passcodeHash.startsWith('scrypt$')) {
+        return parsed.passcodeHash;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function writeClaimedAdminHash(passcodeHash: string) {
+  fs.writeFileSync(
+    ADMIN_AUTH_FILE,
+    JSON.stringify({ passcodeHash, updatedAt: Date.now() }, null, 2),
+    { encoding: 'utf8', mode: 0o600 }
+  );
+}
+
+function readStoredCustomerCodes(): string[] {
+  try {
+    if (fs.existsSync(CUSTOMER_CODES_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(CUSTOMER_CODES_FILE, 'utf8'));
+      return Array.isArray(parsed) ? parsed.filter((c) => typeof c === 'string') : [];
+    }
+  } catch {}
+  return [];
+}
+
+function saveGeneratedCustomerCode(code: string) {
+  const existing = readStoredCustomerCodes();
+  existing.unshift(code);
+  fs.writeFileSync(
+    CUSTOMER_CODES_FILE,
+    JSON.stringify(existing.slice(0, 500), null, 2),
+    { encoding: 'utf8', mode: 0o600 }
+  );
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!isVerifiedAdminRequest(req)) {
+    return res.status(401).json({ error: 'Se requiere sesión verificada de administradora.' });
+  }
+  return next();
 }
 
 function isQuotaError(err: any): boolean {
@@ -89,30 +179,196 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 // Health check / status
 app.get('/api/status', (req, res) => {
   res.json({
-    hasApiKey: !!process.env.GEMINI_API_KEY,
-    mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN,
+    hasApiKey: !!process.env.GEMINI_API_KEY?.trim(),
+    mpVerificationEnabled: !!process.env.MERCADOPAGO_ACCESS_TOKEN?.trim(),
     status: 'ok',
+  });
+});
+
+// Admin Auth & Customer Code Verification Endpoints
+app.get('/api/admin/status', (req, res) => {
+  const hasEnvPasscode = Boolean(process.env.ADMIN_PASSCODE?.trim());
+  const hasClaimedPasscode = Boolean(readClaimedAdminHash());
+  return res.json({
+    hasEnvPasscode,
+    hasClaimedPasscode,
+    needsSetup: !hasEnvPasscode && !hasClaimedPasscode,
+    firebaseAdminEmail: ADMIN_EMAIL,
+    isAuthenticated: isVerifiedAdminRequest(req),
+  });
+});
+
+app.post('/api/admin/claim', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
+    });
+  }
+
+  if (process.env.ADMIN_PASSCODE?.trim() || readClaimedAdminHash()) {
+    return res.status(409).json({ error: 'La contraseña de administradora ya está configurada.' });
+  }
+
+  const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
+  if (rawPasscode.length < 8 || rawPasscode.length > 128) {
+    return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 128 caracteres.' });
+  }
+
+  writeClaimedAdminHash(hashPasscodeScrypt(rawPasscode));
+  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  return res.json({ ok: true, adminToken });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
+    });
+  }
+
+  const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
+  if (!rawPasscode) {
+    return res.status(400).json({ error: 'Ingresa la contraseña de administradora.' });
+  }
+
+  const envPasscode = process.env.ADMIN_PASSCODE?.trim();
+  const claimedHash = readClaimedAdminHash();
+  let verified = false;
+  if (envPasscode) {
+    verified = constantTimeEqual(rawPasscode, envPasscode);
+  } else if (claimedHash) {
+    verified = verifyPasscodeScrypt(rawPasscode, claimedHash);
+  } else {
+    return res.status(403).json({
+      error: 'Configura una contraseña inicial o inicia sesión con Google (tarotistasonline@gmail.com).',
+    });
+  }
+
+  if (!verified) {
+    return res.status(401).json({ error: 'Contraseña incorrecta.' });
+  }
+
+  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  return res.json({ ok: true, adminToken });
+});
+
+app.post('/api/admin/firebase-login', async (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos.`,
+    });
+  }
+
+  const idToken = typeof req.body?.idToken === 'string' ? req.body.idToken.trim() : '';
+  const check = await verifyFirebaseAdminIdToken(idToken, getFirebaseWebApiKey());
+  if (!check.ok) {
+    return res.status(401).json({ error: check.error });
+  }
+
+  const adminToken = signSessionToken('admin', check.email);
+  return res.json({ ok: true, adminToken });
+});
+
+app.get('/api/admin/codes', requireAdmin, (_req, res) => {
+  return res.json({
+    ok: true,
+    codes: readStoredCustomerCodes().slice(0, 25),
+    envCodesCount: getEnvCustomerCodes().length,
+  });
+});
+
+app.post('/api/admin/codes', requireAdmin, (_req, res) => {
+  const generated = generateSignedCustomerCode();
+  saveGeneratedCustomerCode(generated);
+  return res.json({
+    ok: true,
+    code: generated,
+    codes: readStoredCustomerCodes().slice(0, 25),
+  });
+});
+
+app.post('/api/activate-code', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('activate-code', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      ok: false,
+      error: `Demasiados intentos de activación. Espera ${limit.retryAfterSec} segundos.`,
+    });
+  }
+
+  const rawCode = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!rawCode || rawCode.length < 4 || rawCode.length > 128) {
+    return res.status(400).json({ ok: false, error: 'Ingresa un código de activación válido.' });
+  }
+
+  const envAdminPass = process.env.ADMIN_PASSCODE?.trim();
+  const claimedHash = readClaimedAdminHash();
+  if (
+    (envAdminPass && constantTimeEqual(rawCode, envAdminPass)) ||
+    (claimedHash && verifyPasscodeScrypt(rawCode, claimedHash))
+  ) {
+    const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+    return res.json({ ok: true, role: 'admin', adminToken });
+  }
+
+  const normalizedUpper = rawCode.toUpperCase();
+  const envMatch = getEnvCustomerCodes().some((allowed) => constantTimeEqual(normalizedUpper, allowed));
+  const storedMatch = readStoredCustomerCodes().some((allowed) =>
+    constantTimeEqual(normalizedUpper, allowed.toUpperCase())
+  );
+  const signedMatch = verifySignedCustomerCode(normalizedUpper);
+
+  if (envMatch || storedMatch || signedMatch) {
+    const proToken = signSessionToken('pro', 'customer', 365 * 24 * 60 * 60 * 1000);
+    return res.json({ ok: true, role: 'pro', proToken });
+  }
+
+  return res.status(401).json({
+    ok: false,
+    error: 'Código inválido o vencido. Verifica que esté bien escrito o solicita uno nuevo.',
   });
 });
 
 // Translation Endpoint
 app.post('/api/translate', async (req, res) => {
   try {
-    const { text, fromLang, toLang, tone = 'natural' } = req.body;
-
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Text is required for translation.' });
+    const clientRes = resolveAiClient(req);
+    if (!clientRes.ok) {
+      return res.status(400).json({ error: clientRes.error });
     }
 
-    const ai = getAiClient(req);
+    if (!clientRes.usingCustomKey && !isVerifiedProOrAdminRequest(req)) {
+      const ip = getClientIp(req);
+      const limit = checkRateLimit('translate-public', ip, 50, 10 * 60 * 1000);
+      if (!limit.allowed) {
+        return res.status(429).json({
+          error: `Demasiadas traducciones seguidas desde esta conexión. Intenta nuevamente en ${limit.retryAfterSec} s o usa tu propia API Key en Ajustes.`,
+        });
+      }
+    }
+
+    const bodyCheck = validateTranslateBody(req.body);
+    if (!bodyCheck.ok) {
+      return res.status(400).json({ error: bodyCheck.error });
+    }
+
+    const ai = clientRes.ai;
     if (!ai) {
       return res.status(503).json({
         error: 'Servicio de IA no disponible en el servidor.',
       });
     }
 
+    const { text, fromLang, toLang, tone } = bodyCheck;
     const startedAt = Date.now();
-    const prompt = `Real-time spoken interpreter (${tone}). Translate from ${fromLang || 'Auto-detect'} to ${toLang || 'Spanish'}:
+    const prompt = `Real-time spoken interpreter (${tone}). Translate from ${fromLang} to ${toLang}:
 "${text}"
 
 Return ONLY compact JSON:
@@ -133,7 +389,7 @@ Return ONLY compact JSON:
         'gemini-3.1-flash-lite translate'
       );
     } catch (primaryErr: any) {
-      console.warn('gemini-3.1-flash-lite translate fallback to gemini-4-hydrogen:', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite translate fallback to gemini-4-hydrogen');
       try {
         response = await withTimeout(
           ai.models.generateContent({
@@ -187,13 +443,12 @@ Return ONLY compact JSON:
       alternatives: data.alternatives || [],
     });
   } catch (error: any) {
-    console.warn('Translation notice:', error?.message || error);
     const status = isQuotaError(error) ? 429 : isUnavailableError(error) ? 503 : 500;
     const message = isQuotaError(error)
       ? 'Se alcanzó temporalmente el límite de solicitudes de traducción. Inténtalo de nuevo en unos segundos.'
       : isUnavailableError(error)
       ? 'El motor de traducción está con alta demanda temporal. Intenta de nuevo en unos segundos.'
-      : error.message || 'Error al traducir el texto.';
+      : 'No se pudo completar la traducción en este momento.';
     return res.status(status).json({ error: message });
   }
 });
@@ -265,7 +520,13 @@ app.get('/api/visits', (req, res) => {
 });
 
 app.post('/api/visits', (req, res) => {
-  const { isCreator, clientReportedTotal, visitorId } = req.body || {};
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('visits-post', ip, 30, 5 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({ error: 'Límite de actualización de visitas alcanzado.' });
+  }
+
+  const { isCreator, visitorId } = req.body || {};
   const today = new Date().toISOString().split('T')[0];
   
   if (visitsState.lastDate !== today) {
@@ -273,20 +534,16 @@ app.post('/api/visits', (req, res) => {
     visitsState.todayVisits = 1;
   }
 
-  // Real visitors are counted
+  // Real visitors are counted (never trust client-supplied totalVisits)
   if (!isCreator) {
     visitsState.totalVisits += 1;
     visitsState.todayVisits += 1;
 
     // Track unique visitor ID or IP
-    const cleanId = String(visitorId || req.ip || '').slice(0, 40);
+    const cleanId = String(visitorId || ip || '').slice(0, 40);
     if (cleanId && !visitsState.recentHashes.includes(cleanId)) {
       visitsState.recentHashes.push(cleanId);
       visitsState.uniqueVisitors += 1;
-    }
-
-    if (typeof clientReportedTotal === 'number' && clientReportedTotal > visitsState.totalVisits) {
-      visitsState.totalVisits = clientReportedTotal;
     }
 
     persistVisitorStats();
@@ -323,16 +580,27 @@ function writeFeedbackMessages(items: any[]) {
   }
 }
 
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', requireAdmin, (_req, res) => {
   const items = readFeedbackMessages();
   return res.json({ items });
 });
 
 app.post('/api/feedback', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('feedback-post', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados mensajes seguidos. Espera ${limit.retryAfterSec} segundos.`,
+    });
+  }
+
   try {
     const { type = 'suggestion', message, contact, activeLanguagePair, deviceInfo, url, timestamp } = req.body || {};
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'El mensaje es obligatorio.' });
+    }
+    if (message.trim().length > 2000) {
+      return res.status(400).json({ error: 'El mensaje supera el máximo de 2000 caracteres.' });
     }
     const items = readFeedbackMessages();
     const newItem = {
@@ -340,7 +608,15 @@ app.post('/api/feedback', (req, res) => {
       type: ['issue', 'suggestion', 'praise', 'payment'].includes(type) ? type : 'suggestion',
       message: message.trim().slice(0, 2000),
       contact: typeof contact === 'string' ? contact.trim().slice(0, 200) : undefined,
-      activeLanguagePair,
+      activeLanguagePair:
+        activeLanguagePair &&
+        typeof activeLanguagePair.from === 'string' &&
+        typeof activeLanguagePair.to === 'string'
+          ? {
+              from: activeLanguagePair.from.slice(0, 60),
+              to: activeLanguagePair.to.slice(0, 60),
+            }
+          : undefined,
       deviceInfo: typeof deviceInfo === 'string' ? deviceInfo.slice(0, 200) : undefined,
       url: typeof url === 'string' ? url.slice(0, 300) : undefined,
       timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
@@ -348,8 +624,8 @@ app.post('/api/feedback', (req, res) => {
     items.unshift(newItem);
     writeFeedbackMessages(items);
     return res.json({ ok: true, item: newItem });
-  } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Error al guardar el mensaje.' });
+  } catch {
+    return res.status(500).json({ error: 'Error al guardar el mensaje.' });
   }
 });
 
@@ -386,6 +662,15 @@ function writeVerifiedPayments(records: VerifiedPaymentRecord[]) {
 }
 
 app.post('/api/verify-mercadopago', async (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('verify-mp', ip, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      ok: false,
+      error: `Demasiados intentos de verificación. Espera ${limit.retryAfterSec} segundos.`,
+    });
+  }
+
   try {
     const { operationId, contact } = req.body || {};
     const cleanId = String(operationId || '').trim().replace(/\D/g, '');
@@ -398,7 +683,7 @@ app.post('/api/verify-mercadopago', async (req, res) => {
     }
 
     const cleanContact = typeof contact === 'string' ? contact.trim().slice(0, 200) : '';
-    const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN?.trim();
 
     const recordPendingManual = () => {
       const items = readFeedbackMessages();
@@ -489,13 +774,14 @@ app.post('/api/verify-mercadopago', async (req, res) => {
     });
     writeFeedbackMessages(items);
 
+    const proToken = signSessionToken('pro', `mp:${cleanId}`, 365 * 24 * 60 * 60 * 1000);
     return res.json({
       ok: true,
       verified: true,
+      proToken,
       message: '¡Pago verificado con Mercado Pago! Tu Pase Ilimitado ha sido activado.',
     });
-  } catch (err: any) {
-    console.error('Mercado Pago verify error:', err);
+  } catch {
     return res.status(500).json({
       ok: false,
       error: 'Ocurrió un error al verificar el pago. Intenta nuevamente.',
@@ -505,28 +791,51 @@ app.post('/api/verify-mercadopago', async (req, res) => {
 
 // Audio Multimodal Direct Translation Endpoint
 app.post('/api/translate-audio', async (req, res) => {
-  const { audioBase64, mimeType = 'audio/webm', fromLang, toLang } = req.body || {};
-
   try {
-    if (!audioBase64) {
-      return res.status(400).json({ error: 'Audio data is required.' });
+    const clientRes = resolveAiClient(req);
+    if (!clientRes.ok) {
+      return res.status(400).json({ error: clientRes.error });
     }
 
-    const ai = getAiClient(req);
+    if (!clientRes.usingCustomKey && !isVerifiedProOrAdminRequest(req)) {
+      const ip = getClientIp(req);
+      const limit = checkRateLimit('translate-audio-public', ip, 40, 10 * 60 * 1000);
+      if (!limit.allowed) {
+        return res.status(429).json({
+          error: `Demasiadas traducciones de audio seguidas. Espera ${limit.retryAfterSec} s o usa tu propia API Key en Ajustes.`,
+        });
+      }
+    }
+
+    const audioCheck = validateAudioPayload(req.body?.audioBase64, req.body?.mimeType);
+    if (!audioCheck.ok) {
+      return res.status(400).json({ error: audioCheck.error });
+    }
+
+    const ai = clientRes.ai;
     if (!ai) {
       return res.status(503).json({
         error: 'Servicio de IA no disponible en el servidor.',
       });
     }
 
+    const fromLang =
+      typeof req.body?.fromLang === 'string' && req.body.fromLang.trim()
+        ? req.body.fromLang.trim().slice(0, 80)
+        : 'Auto-detect';
+    const toLang =
+      typeof req.body?.toLang === 'string' && req.body.toLang.trim()
+        ? req.body.toLang.trim().slice(0, 80)
+        : 'Spanish';
+
     const audioPart = {
       inlineData: {
-        mimeType: mimeType.split(';')[0] || 'audio/webm',
-        data: audioBase64,
+        mimeType: audioCheck.mimeType,
+        data: audioCheck.base64,
       },
     };
 
-    const promptText = `Transcribe and translate spoken audio from ${fromLang || 'Auto-detect'} to ${toLang || 'Spanish'}.
+    const promptText = `Transcribe and translate spoken audio from ${fromLang} to ${toLang}.
 If silent or no clear human speech, return "" for transcribedText and translatedText. Never invent speech.
 Return ONLY compact JSON:
 {"transcribedText":"exact speech or empty","detectedLanguage":"language in Spanish","translatedText":"natural translation or empty","phonetic":""}`;
@@ -552,7 +861,7 @@ Return ONLY compact JSON:
       );
     } catch (primaryErr: any) {
       lastError = primaryErr;
-      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen):', primaryErr?.message || primaryErr);
+      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen)');
 
       // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen (low thinking for fast audio response)
       try {
@@ -573,9 +882,6 @@ Return ONLY compact JSON:
         );
       } catch (fallbackErr: any) {
         lastError = fallbackErr;
-        if (!response) {
-          console.warn('Audio translation models notice:', lastError?.message || lastError);
-        }
       }
     }
 
@@ -585,7 +891,7 @@ Return ONLY compact JSON:
         ? 'Se alcanzó el límite de solicitudes de traducción de audio. Espera un momento o usa el micrófono nuevamente.'
         : isUnavailableError(lastError)
         ? 'El motor de traducción de audio está con alta demanda temporal. Intenta de nuevo en unos segundos.'
-        : lastError?.message || 'No se pudo procesar el audio en el servidor.';
+        : 'No se pudo procesar el audio en el servidor.';
       return res.status(status).json({ error: message });
     }
 
@@ -618,11 +924,11 @@ Return ONLY compact JSON:
       try {
         const fallbackTranslate = await ai.models.generateContent({
           model: 'gemini-3.1-flash-lite',
-          contents: `Translate this spoken sentence directly to ${toLang || 'Spanish'}: "${data.transcribedText}". Return ONLY the translation, nothing else.`,
+          contents: `Translate this spoken sentence directly to ${toLang}: "${data.transcribedText}". Return ONLY the translation, nothing else.`,
         });
         data.translatedText = (fallbackTranslate.text || '').replace(/^["']|["']$/g, '').trim();
-      } catch (e) {
-        console.warn('Fallback single translate error:', e);
+      } catch {
+        // Keep existing transcribed text fallback
       }
     }
 
@@ -632,10 +938,9 @@ Return ONLY compact JSON:
       translatedText: data.translatedText || data.transcribedText || 'Audio recibido',
       phonetic: data.phonetic || '',
     });
-  } catch (error: any) {
-    console.error('Audio translate global handler:', error);
+  } catch {
     return res.status(500).json({
-      error: error?.message || 'Error interno al procesar el audio.',
+      error: 'Error interno al procesar el audio.',
     });
   }
 });
@@ -643,19 +948,28 @@ Return ONLY compact JSON:
 // Text-to-Speech Endpoint using browser synthesis fallback or Gemini TTS if supported
 app.post('/api/tts', async (req, res) => {
   try {
-    const { text, voiceName = 'Kore' } = req.body;
+    const clientRes = resolveAiClient(req);
+    if (!clientRes.ok) {
+      return res.status(400).json({ error: clientRes.error });
+    }
 
+    if (!clientRes.usingCustomKey && !isVerifiedProOrAdminRequest(req)) {
+      const ip = getClientIp(req);
+      const limit = checkRateLimit('tts-public', ip, 40, 10 * 60 * 1000);
+      if (!limit.allowed) {
+        return res.json({ audioBase64: null });
+      }
+    }
+
+    const { text } = req.body || {};
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Text is required for TTS.' });
     }
 
-    const ai = getAiClient(req);
+    const ai = clientRes.ai;
     if (!ai) {
       return res.json({ audioBase64: null });
     }
-
-    const allowedVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
-    const chosenVoice = allowedVoices.includes(voiceName) ? voiceName : 'Kore';
 
     try {
       const response = await ai.models.generateContent({

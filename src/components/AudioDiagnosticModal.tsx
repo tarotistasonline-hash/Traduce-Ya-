@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { sanitizeExternalUrl } from '../utils/urlSecurity';
 import {
   X,
   Mic,
@@ -840,7 +841,7 @@ export const AudioDiagnosticModal: React.FC<AudioDiagnosticModalProps> = ({
               </div>
               <div className="flex flex-wrap items-center gap-2 pl-6">
                 <a
-                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  href={typeof window !== 'undefined' ? sanitizeExternalUrl(window.location.href, '#') : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"

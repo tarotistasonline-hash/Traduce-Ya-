@@ -1,11 +1,20 @@
 import { getApiEndpoint } from '../utils/apiConfig';
-import { getUserApiKey } from '../utils/licenseManager';
+import { getAdminToken, getProToken, getUserApiKey } from '../utils/licenseManager';
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const userKey = getUserApiKey();
   if (userKey) {
     headers['x-gemini-api-key'] = userKey;
+  }
+  const adminToken = getAdminToken();
+  if (adminToken) {
+    headers['Authorization'] = `Bearer ${adminToken}`;
+  } else {
+    const proToken = getProToken();
+    if (proToken) {
+      headers['x-pro-token'] = proToken;
+    }
   }
   return headers;
 }

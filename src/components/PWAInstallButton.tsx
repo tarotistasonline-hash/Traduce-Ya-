@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, Share2, PlusSquare, X, Smartphone, Check, MoreVertical } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { sanitizeExternalUrl } from '../utils/urlSecurity';
 
 interface PWAInstallButtonProps {
   variant?: 'header' | 'settings' | 'banner';
@@ -104,7 +105,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'h
                       Estás dentro de una vista previa integrada (como AI Studio o WhatsApp). Para poder instalarla, primero ábrela directo en Chrome/Safari:
                     </p>
                     <a
-                      href={typeof window !== 'undefined' ? window.location.href : '#'}
+                      href={typeof window !== 'undefined' ? sanitizeExternalUrl(window.location.href, '#') : '#'}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition"

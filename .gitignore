@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+admin_auth.json
+customer_codes.json
+verified_payments.json
+

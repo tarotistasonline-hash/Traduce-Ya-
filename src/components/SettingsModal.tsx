@@ -30,10 +30,29 @@ import {
   Zap,
   Radio,
   Languages,
+  Lock,
+  LogIn,
+  LogOut,
+  Loader2,
 } from 'lucide-react';
+import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
-import { isCreatorUser, setCreatorUser, FREE_TRIAL_LIMIT, getUserApiKey, setUserApiKey } from '../utils/licenseManager';
+import {
+  FREE_TRIAL_LIMIT,
+  getUserApiKey,
+  setUserApiKey,
+  isAdminAuthenticated,
+  fetchAdminStatus,
+  claimAdminPasscode,
+  loginAdminWithPasscode,
+  loginAdminWithFirebase,
+  clearAdminSession,
+  getAnalyticsOptOut,
+  setAnalyticsOptOut,
+  AdminStatusResponse,
+} from '../utils/licenseManager';
 import { translateText } from '../services/geminiService';
 
 interface SettingsModalProps {
@@ -48,6 +67,8 @@ interface SettingsModalProps {
   onOpenFeedbackViewer?: () => void;
   onOpenAudioDiagnostic?: () => void;
   onOpenPaywall?: () => void;
+  onAdminStatusChange?: () => void;
+  onProStatusChange?: () => void;
   isPro?: boolean;
   remainingQuota?: number;
   visitorStats?: {
@@ -69,19 +90,110 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenFeedbackViewer,
   onOpenAudioDiagnostic,
   onOpenPaywall,
+  onAdminStatusChange,
+  onProStatusChange,
   isPro,
   remainingQuota,
   visitorStats,
 }) => {
-  const [isCreator, setIsCreator] = useState(isCreatorUser);
+  const [isAdmin, setIsAdmin] = useState(isAdminAuthenticated);
+  const [adminStatus, setAdminStatus] = useState<AdminStatusResponse | null>(null);
+  const [showAdminLoginBox, setShowAdminLoginBox] = useState(false);
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState('');
+  const [adminAuthLoading, setAdminAuthLoading] = useState(false);
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [analyticsOptOut, setAnalyticsOptOutState] = useState(getAnalyticsOptOut);
+
   const [userApiKeyInput, setUserApiKeyInput] = useState(getUserApiKey());
   const [savedApiKeyMsg, setSavedApiKeyMsg] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [isTestingApi, setIsTestingApi] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [testApiResult, setTestApiResult] = useState<{
     ok: boolean;
     message: string;
   } | null>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setIsAdmin(isAdminAuthenticated());
+    fetchAdminStatus().then((status) => {
+      if (!active) return;
+      setAdminStatus(status);
+      setIsAdmin(status.isAuthenticated);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
+
+  const handleGoogleAdminLogin = async () => {
+    setAdminAuthLoading(true);
+    setAdminAuthError(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const cred = await signInWithPopup(auth, provider);
+      const idToken = await cred.user.getIdToken();
+      const result = await loginAdminWithFirebase(idToken);
+      if (result.ok) {
+        setIsAdmin(true);
+        setShowAdminLoginBox(false);
+        onAdminStatusChange?.();
+        onProStatusChange?.();
+      } else {
+        await signOut(auth).catch(() => {});
+        setAdminAuthError(result.error || 'No autorizado para esta cuenta.');
+      }
+    } catch (err: any) {
+      setAdminAuthError(
+        err?.code === 'auth/popup-closed-by-user'
+          ? 'Se cerró la ventana de inicio de sesión.'
+          : 'No se pudo iniciar sesión con Google en este navegador.'
+      );
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const handlePasscodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError(null);
+    if (!adminPasscodeInput.trim()) {
+      setAdminAuthError('Ingresa la contraseña de administradora.');
+      return;
+    }
+    setAdminAuthLoading(true);
+    try {
+      const result = adminStatus?.needsSetup
+        ? await claimAdminPasscode(adminPasscodeInput)
+        : await loginAdminWithPasscode(adminPasscodeInput);
+      if (result.ok) {
+        setIsAdmin(true);
+        setAdminPasscodeInput('');
+        setShowAdminLoginBox(false);
+        setAdminStatus((prev) =>
+          prev ? { ...prev, needsSetup: false, hasClaimedPasscode: true, isAuthenticated: true } : prev
+        );
+        onAdminStatusChange?.();
+        onProStatusChange?.();
+      } else {
+        setAdminAuthError(result.error || 'No se pudo verificar la contraseña.');
+      }
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    clearAdminSession();
+    await signOut(auth).catch(() => {});
+    setIsAdmin(false);
+    setAdminAuthError(null);
+    onAdminStatusChange?.();
+    onProStatusChange?.();
+  };
 
   const handleTestApi = async () => {
     setIsTestingApi(true);
@@ -255,8 +367,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setUserApiKey(userApiKeyInput);
+                    const result = setUserApiKey(userApiKeyInput);
+                    if (!result.ok) {
+                      setApiKeyError(result.error || 'Formato de API Key inválido.');
+                      setSavedApiKeyMsg(false);
+                      return;
+                    }
+                    setApiKeyError(null);
                     setSavedApiKeyMsg(true);
+                    onProStatusChange?.();
                     setTimeout(() => setSavedApiKeyMsg(false), 3000);
                   }}
                   className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-sm"
@@ -269,7 +388,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClick={() => {
                       setUserApiKey('');
                       setUserApiKeyInput('');
+                      setApiKeyError(null);
                       setSavedApiKeyMsg(false);
+                      onProStatusChange?.();
                     }}
                     className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-medium transition"
                   >
@@ -277,6 +398,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 )}
               </div>
+              {apiKeyError && (
+                <p className="text-[11px] text-rose-400 font-medium text-center">
+                  {apiKeyError}
+                </p>
+              )}
               {savedApiKeyMsg && (
                 <p className="text-[11px] text-emerald-400 font-medium text-center">
                   ✅ ¡Clave guardada! Traducciones ilimitadas activadas en este dispositivo.
@@ -313,36 +439,115 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* Creator exclusion indicator & control */}
-              <div className="pt-2 border-t border-slate-800/90 flex items-center justify-between text-xs">
-                <div className="flex items-start gap-1.5 pr-2">
-                  <span className="text-base">👑</span>
-                  <div>
-                    <p className="font-bold text-amber-300 text-[11px] leading-tight">
-                      Modo Creador / Pruebas
-                    </p>
-                    <p className="text-[10px] text-slate-400 leading-tight">
-                      {isCreator
-                        ? 'Excluido del contador de visitas y con traducciones ilimitadas.'
-                        : 'Actívalo para no alterar el contador durante tus pruebas.'}
-                    </p>
-                  </div>
+              {/* Analytics exclusion toggle (does NOT grant Pro/Admin) */}
+              <div className="pt-2 border-t border-slate-800/90 flex items-center justify-between text-xs gap-2">
+                <div>
+                  <p className="font-semibold text-slate-200 text-[11px] leading-tight">
+                    No contar este dispositivo en visitas
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Solo omite tu propia visita en las estadísticas públicas.
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    const next = !isCreator;
-                    setCreatorUser(next);
-                    setIsCreator(next);
+                    const next = !analyticsOptOut;
+                    setAnalyticsOptOut(next);
+                    setAnalyticsOptOutState(next);
                   }}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border shrink-0 ${
-                    isCreator
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                    analyticsOptOut
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                       : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                   }`}
                 >
-                  {isCreator ? '✓ Excluido (Ilimitado)' : 'Excluirme'}
+                  {analyticsOptOut ? '✓ Excluido' : 'Excluir visita'}
                 </button>
+              </div>
+
+              {/* Verified Admin / Owner Authentication */}
+              <div className="pt-2 border-t border-slate-800/90 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-start gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-amber-300 text-[11px] leading-tight">
+                        Acceso Administradora
+                      </p>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        {isAdmin
+                          ? 'Sesión verificada activa (Buzón privado y acceso ilimitado).'
+                          : `Solo para la titular (${adminStatus?.firebaseAdminEmail || 'tarotistasonline@gmail.com'}).`}
+                      </p>
+                    </div>
+                  </div>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={handleAdminLogout}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 transition flex items-center gap-1 shrink-0"
+                    >
+                      <LogOut className="w-3 h-3" />
+                      <span>Cerrar sesión</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminLoginBox((v) => !v)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700 transition flex items-center gap-1 shrink-0"
+                    >
+                      <LogIn className="w-3 h-3" />
+                      <span>Iniciar sesión</span>
+                    </button>
+                  )}
+                </div>
+
+                {!isAdmin && showAdminLoginBox && (
+                  <div className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-2.5">
+                    <button
+                      type="button"
+                      disabled={adminAuthLoading}
+                      onClick={handleGoogleAdminLogin}
+                      className="w-full py-2 px-3 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
+                    >
+                      {adminAuthLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      )}
+                      <span>Entrar con Google (tarotistasonline@gmail.com)</span>
+                    </button>
+
+                    <form onSubmit={handlePasscodeSubmit} className="space-y-1.5 pt-1.5 border-t border-slate-800">
+                      <label className="block text-[10px] text-slate-400">
+                        {adminStatus?.needsSetup
+                          ? 'Primera vez: define tu contraseña secreta de administradora (mín. 8 caracteres):'
+                          : 'O ingresa con tu contraseña de administradora:'}
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="password"
+                          value={adminPasscodeInput}
+                          onChange={(e) => setAdminPasscodeInput(e.target.value)}
+                          placeholder={adminStatus?.needsSetup ? 'Nueva contraseña (8+ caracteres)' : 'Contraseña de administradora'}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                        />
+                        <button
+                          type="submit"
+                          disabled={adminAuthLoading}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition disabled:opacity-50 shrink-0"
+                        >
+                          {adminStatus?.needsSetup ? 'Configurar' : 'Entrar'}
+                        </button>
+                      </div>
+                    </form>
+
+                    {adminAuthError && (
+                      <p className="text-[11px] text-rose-400">{adminAuthError}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -441,8 +646,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           )}
 
-          {/* Ver Mensajes Recibidos en el Buzón (Panel Dueño) */}
-          {onOpenFeedbackViewer && (
+          {/* Ver Mensajes Recibidos en el Buzón (Solo Administradora Verificada) */}
+          {onOpenFeedbackViewer && isAdmin && (
             <button
               onClick={() => {
                 onClose();

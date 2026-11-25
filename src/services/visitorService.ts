@@ -6,7 +6,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { isCreatorUser } from '../utils/licenseManager';
+import { getAnalyticsOptOut, isAdminAuthenticated } from '../utils/licenseManager';
 
 export interface VisitorStats {
   totalVisits: number;
@@ -69,7 +69,7 @@ export function getCachedVisitorStats(): VisitorStats {
 }
 
 export async function fetchAndRecordVisit(): Promise<VisitorStats> {
-  const isCreator = isCreatorUser();
+  const isCreator = isAdminAuthenticated() || getAnalyticsOptOut();
   const cached = getCachedVisitorStats();
   const today = getTodayUtcDate();
 

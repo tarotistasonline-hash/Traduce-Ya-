@@ -68,15 +68,15 @@ import { AudioDiagnosticModal } from './components/AudioDiagnosticModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   isProUser,
-  isCreatorUser,
-  setCreatorUser,
+  isAdminAuthenticated,
   getFreeTrialUsage,
   incrementFreeTrialUsage,
   getRemainingTranslations,
   canPerformTranslation,
-  checkUrlAutoUnlock,
+  verifyUrlReturnUnlock,
   FREE_TRIAL_LIMIT,
 } from './utils/licenseManager';
+import { sanitizeExternalUrl } from './utils/urlSecurity';
 
 const STORAGE_KEY_TURNS = 'traductor_ya_turns_v1';
 const STORAGE_KEY_SETTINGS = 'traductor_ya_settings_v1';
@@ -163,22 +163,32 @@ export default function App() {
 
   // Monetization & usage quota state
   const [isPro, setIsPro] = useState<boolean>(() => isProUser());
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => isAdminAuthenticated());
   const [remainingQuota, setRemainingQuota] = useState<number>(() => getRemainingTranslations());
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
 
-  // Check URL query parameters for auto-unlock after payment redirection
+  const syncLicenseState = useCallback(() => {
+    setIsAdmin(isAdminAuthenticated());
+    setIsPro(isProUser());
+    setRemainingQuota(getRemainingTranslations());
+  }, []);
+
+  // Verify legitimate server-backed activation code or Mercado Pago return params
   useEffect(() => {
-    const unlocked = checkUrlAutoUnlock();
-    if (unlocked) {
-      setIsPro(true);
-      setRemainingQuota(Infinity);
+    let active = true;
+    verifyUrlReturnUnlock().then((unlocked) => {
+      if (!active || !unlocked) return;
+      syncLicenseState();
       setStatusAlert({
-        message: '🎉 ¡Pase Ilimitado Activado! Gracias por tu compra. Ya puedes traducir sin límites.',
+        message: '🎉 ¡Pase Ilimitado Activado! Gracias por tu verificación.',
         type: 'success',
       });
       setTimeout(() => setStatusAlert(null), 8000);
-    }
-  }, []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [syncLicenseState]);
 
   // Visitor stats state (visitas reales con auto-recuperación)
   const [visitorStats, setVisitorStats] = useState<VisitorStats>(() => getCachedVisitorStats());
@@ -942,13 +952,13 @@ export default function App() {
           >
             <Eye className="w-3.5 h-3.5 text-cyan-400" />
             <span className="font-mono text-cyan-300 font-bold">{visitorStats.totalVisits.toLocaleString()}</span>
-            {isCreatorUser() && (
+            {isAdmin && (
               <span className="text-[10px] text-amber-400 font-semibold">👑</span>
             )}
           </button>
 
           <a
-            href={typeof window !== 'undefined' ? window.location.href : '#'}
+            href={typeof window !== 'undefined' ? sanitizeExternalUrl(window.location.href, '#') : '#'}
             target="_blank"
             rel="noopener noreferrer"
             className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1 transition shrink-0"
@@ -971,7 +981,7 @@ export default function App() {
               Vista previa integrada: si el micrófono no responde en el celular, ábrela directo en el navegador.
             </span>
             <a
-              href={typeof window !== 'undefined' ? window.location.href : '#'}
+              href={typeof window !== 'undefined' ? sanitizeExternalUrl(window.location.href, '#') : '#'}
               target="_blank"
               rel="noopener noreferrer"
               className="px-2.5 py-0.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 shrink-0 transition"
@@ -1007,7 +1017,7 @@ export default function App() {
             {statusAlert.type === 'error' && (
               <div className="flex flex-wrap items-center gap-2 pl-6">
                 <a
-                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  href={typeof window !== 'undefined' ? sanitizeExternalUrl(window.location.href, '#') : '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-2.5 py-1 rounded-md bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[11px] transition"
@@ -1331,6 +1341,8 @@ export default function App() {
         onOpenFeedbackViewer={() => setIsFeedbackViewerOpen(true)}
         onOpenAudioDiagnostic={() => setIsAudioDiagnosticOpen(true)}
         onOpenPaywall={() => setIsPaywallOpen(true)}
+        onAdminStatusChange={syncLicenseState}
+        onProStatusChange={syncLicenseState}
         isPro={isPro}
         remainingQuota={remainingQuota}
         visitorStats={visitorStats}
@@ -1393,8 +1405,7 @@ export default function App() {
         isOpen={isPaywallOpen}
         onClose={() => setIsPaywallOpen(false)}
         onActivated={() => {
-          setIsPro(true);
-          setRemainingQuota(Infinity);
+          syncLicenseState();
           setStatusAlert({
             message: '🎉 ¡Pase Ilimitado Activado con éxito!',
             type: 'success',
