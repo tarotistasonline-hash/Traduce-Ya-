@@ -1,31 +1,5 @@
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import type express from 'express';
-
-export const ADMIN_EMAIL = 'tarotistasonline@gmail.com';
-
-export function getFirebaseWebApiKey(): string {
-  const envKey = process.env.FIREBASE_WEB_API_KEY?.trim();
-  if (envKey) return envKey;
-  const candidates = [
-    path.resolve(process.cwd(), 'firebase-applet-config.json'),
-    path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'firebase-applet-config.json'),
-  ];
-  for (const filePath of candidates) {
-    try {
-      if (fs.existsSync(filePath)) {
-        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        if (typeof parsed?.apiKey === 'string' && parsed.apiKey.trim()) {
-          return parsed.apiKey.trim();
-        }
-      }
-    } catch {
-      // Ignore unreadable candidate path
-    }
-  }
-  return '';
-}
 
 // In-memory runtime fallback secret when ADMIN_SESSION_SECRET / LICENSE_SECRET is unset
 const EPHEMERAL_SECRET = crypto.randomBytes(32).toString('hex');
@@ -42,6 +16,12 @@ export function constantTimeEqual(a: string, b: string): boolean {
   const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
   const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
   return crypto.timingSafeEqual(hashA, hashB);
+}
+
+export function isValidAdminPasscode(rawPasscode: string): boolean {
+  const clean = rawPasscode.trim();
+  // Supports 6-digit numeric PIN (e.g., 482910) or longer custom passcodes (up to 128 chars)
+  return /^\d{6}$/.test(clean) || (clean.length >= 6 && clean.length <= 128);
 }
 
 export function hashPasscodeScrypt(passcode: string): string {
@@ -189,44 +169,281 @@ export function getEnvCustomerCodes(): string[] {
     .filter((c) => c.length >= 4);
 }
 
-export async function verifyFirebaseAdminIdToken(
-  idToken: string,
-  firebaseWebApiKey: string
-): Promise<{ ok: true; email: string } | { ok: false; error: string }> {
-  if (!idToken || typeof idToken !== 'string' || idToken.length < 100 || idToken.length > 4096) {
-    return { ok: false, error: 'Token de sesión inválido.' };
+// ============================================================
+// WebAuthn / Biometric Passkey Verification (ES256 / P-256)
+// ============================================================
+
+export interface StoredWebAuthnCredential {
+  credentialId: string;
+  publicKeySpkiB64Url: string;
+  rpId: string;
+  createdAt: number;
+}
+
+export function getRequestHostname(req: express.Request): string {
+  const rawHost =
+    (typeof req.headers['x-forwarded-host'] === 'string' && req.headers['x-forwarded-host']) ||
+    req.headers.host ||
+    'localhost';
+  const firstHost = rawHost.split(',')[0].trim().toLowerCase();
+  return firstHost.replace(/:\d+$/, '') || 'localhost';
+}
+
+export function createWebAuthnChallenge(purpose: 'register' | 'auth'): {
+  challenge: string;
+  challengeToken: string;
+} {
+  const challenge = crypto.randomBytes(32).toString('base64url');
+  const payload = {
+    purpose,
+    challenge,
+    exp: Date.now() + 5 * 60 * 1000,
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sigB64 = crypto
+    .createHmac('sha256', getSigningSecret())
+    .update(`webauthn:${payloadB64}`)
+    .digest('base64url');
+  return { challenge, challengeToken: `${payloadB64}.${sigB64}` };
+}
+
+export function verifyWebAuthnChallenge(
+  challengeToken: unknown,
+  expectedPurpose: 'register' | 'auth'
+): string | null {
+  if (typeof challengeToken !== 'string' || !challengeToken.includes('.')) return null;
+  const [payloadB64, sigB64] = challengeToken.split('.');
+  if (!payloadB64 || !sigB64) return null;
+  try {
+    const expectedSig = crypto
+      .createHmac('sha256', getSigningSecret())
+      .update(`webauthn:${payloadB64}`)
+      .digest('base64url');
+    if (!constantTimeEqual(sigB64, expectedSig)) return null;
+    const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (
+      !parsed ||
+      parsed.purpose !== expectedPurpose ||
+      typeof parsed.challenge !== 'string' ||
+      typeof parsed.exp !== 'number' ||
+      parsed.exp <= Date.now()
+    ) {
+      return null;
+    }
+    return parsed.challenge;
+  } catch {
+    return null;
   }
-  if (!firebaseWebApiKey) {
-    return { ok: false, error: 'Configuración de autenticación no disponible.' };
+}
+
+export function signBiometricBundle(cred: StoredWebAuthnCredential): string {
+  const payloadB64 = Buffer.from(JSON.stringify(cred), 'utf8').toString('base64url');
+  const sigB64 = crypto
+    .createHmac('sha256', getSigningSecret())
+    .update(`bio:${payloadB64}`)
+    .digest('base64url');
+  return `${payloadB64}.${sigB64}`;
+}
+
+export function verifyBiometricBundle(bundle: unknown): StoredWebAuthnCredential | null {
+  if (typeof bundle !== 'string' || !bundle.includes('.')) return null;
+  const [payloadB64, sigB64] = bundle.split('.');
+  if (!payloadB64 || !sigB64) return null;
+  try {
+    const expectedSig = crypto
+      .createHmac('sha256', getSigningSecret())
+      .update(`bio:${payloadB64}`)
+      .digest('base64url');
+    if (!constantTimeEqual(sigB64, expectedSig)) return null;
+    const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as StoredWebAuthnCredential;
+    if (
+      !parsed ||
+      typeof parsed.credentialId !== 'string' ||
+      typeof parsed.publicKeySpkiB64Url !== 'string' ||
+      typeof parsed.rpId !== 'string'
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function getEnvWebAuthnCredentials(): StoredWebAuthnCredential[] {
+  const raw = process.env.ADMIN_WEBAUTHN_CRED?.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list.filter(
+      (item): item is StoredWebAuthnCredential =>
+        Boolean(
+          item &&
+            typeof item.credentialId === 'string' &&
+            typeof item.publicKeySpkiB64Url === 'string' &&
+            typeof item.rpId === 'string'
+        )
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function verifyWebAuthnRegistration(params: {
+  challengeToken: unknown;
+  expectedHostname: string;
+  credentialId: unknown;
+  publicKeySpkiB64Url: unknown;
+  clientDataJSON: unknown;
+  authenticatorData: unknown;
+}): { ok: true; credential: StoredWebAuthnCredential } | { ok: false; error: string } {
+  const expectedChallenge = verifyWebAuthnChallenge(params.challengeToken, 'register');
+  if (!expectedChallenge) {
+    return { ok: false, error: 'La solicitud biométrica expiró. Intenta nuevamente.' };
+  }
+
+  if (
+    typeof params.credentialId !== 'string' ||
+    typeof params.publicKeySpkiB64Url !== 'string' ||
+    typeof params.clientDataJSON !== 'string' ||
+    typeof params.authenticatorData !== 'string'
+  ) {
+    return { ok: false, error: 'Datos biométricos incompletos.' };
   }
 
   try {
-    const resp = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseWebApiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      }
+    const clientData = JSON.parse(
+      Buffer.from(params.clientDataJSON, 'base64url').toString('utf8')
     );
-    if (!resp.ok) {
-      return { ok: false, error: 'La sesión de Google no es válida o expiró.' };
+    if (clientData?.type !== 'webauthn.create') {
+      return { ok: false, error: 'Tipo de registro biométrico inválido.' };
     }
-    const data: any = await resp.json();
-    const user = Array.isArray(data?.users) ? data.users[0] : null;
-    const email = String(user?.email || '').trim().toLowerCase();
-    const emailVerified = Boolean(user?.emailVerified);
-
-    if (!email || !emailVerified || email !== ADMIN_EMAIL) {
-      return {
-        ok: false,
-        error: `Acceso restringido únicamente a la cuenta verificada ${ADMIN_EMAIL}.`,
-      };
+    if (!constantTimeEqual(String(clientData?.challenge || ''), expectedChallenge)) {
+      return { ok: false, error: 'Desafío biométrico no coincide.' };
+    }
+    const originHost = new URL(String(clientData?.origin || '')).hostname.toLowerCase();
+    if (originHost !== params.expectedHostname) {
+      return { ok: false, error: 'Origen biométrico no coincide con este dominio.' };
     }
 
-    return { ok: true, email };
+    const authData = Buffer.from(params.authenticatorData, 'base64url');
+    if (authData.length < 37) {
+      return { ok: false, error: 'Datos del autenticador inválidos.' };
+    }
+
+    const rpIdHash = authData.subarray(0, 32);
+    const expectedRpIdHash = crypto.createHash('sha256').update(params.expectedHostname).digest();
+    if (!crypto.timingSafeEqual(rpIdHash, expectedRpIdHash)) {
+      return { ok: false, error: 'El identificador de dominio de la huella no coincide.' };
+    }
+
+    const flags = authData[32];
+    const userPresent = (flags & 0x01) !== 0;
+    if (!userPresent) {
+      return { ok: false, error: 'No se confirmó presencia de usuario en el sensor.' };
+    }
+
+    const keyObj = crypto.createPublicKey({
+      key: Buffer.from(params.publicKeySpkiB64Url, 'base64url'),
+      format: 'der',
+      type: 'spki',
+    });
+    if (keyObj.asymmetricKeyType !== 'ec') {
+      return { ok: false, error: 'Solo se admiten llaves biométricas ECDSA (P-256).' };
+    }
+
+    return {
+      ok: true,
+      credential: {
+        credentialId: params.credentialId,
+        publicKeySpkiB64Url: params.publicKeySpkiB64Url,
+        rpId: params.expectedHostname,
+        createdAt: Date.now(),
+      },
+    };
   } catch {
-    return { ok: false, error: 'No se pudo verificar la cuenta de Google en este momento.' };
+    return { ok: false, error: 'No se pudo validar la credencial biométrica.' };
+  }
+}
+
+export function verifyWebAuthnAssertion(params: {
+  challengeToken: unknown;
+  expectedHostname: string;
+  storedCredential: StoredWebAuthnCredential;
+  clientDataJSON: unknown;
+  authenticatorData: unknown;
+  signature: unknown;
+}): { ok: true } | { ok: false; error: string } {
+  const expectedChallenge = verifyWebAuthnChallenge(params.challengeToken, 'auth');
+  if (!expectedChallenge) {
+    return { ok: false, error: 'La sesión de huella expiró. Vuelve a tocar el botón.' };
+  }
+
+  if (
+    typeof params.clientDataJSON !== 'string' ||
+    typeof params.authenticatorData !== 'string' ||
+    typeof params.signature !== 'string'
+  ) {
+    return { ok: false, error: 'Firma biométrica incompleta.' };
+  }
+
+  try {
+    const clientDataBuf = Buffer.from(params.clientDataJSON, 'base64url');
+    const clientData = JSON.parse(clientDataBuf.toString('utf8'));
+    if (clientData?.type !== 'webauthn.get') {
+      return { ok: false, error: 'Operación biométrica inválida.' };
+    }
+    if (!constantTimeEqual(String(clientData?.challenge || ''), expectedChallenge)) {
+      return { ok: false, error: 'El desafío de seguridad no coincide.' };
+    }
+
+    const originHost = new URL(String(clientData?.origin || '')).hostname.toLowerCase();
+    if (
+      originHost !== params.expectedHostname ||
+      originHost !== params.storedCredential.rpId.toLowerCase()
+    ) {
+      return { ok: false, error: 'Esta huella corresponde a otro dominio.' };
+    }
+
+    const authData = Buffer.from(params.authenticatorData, 'base64url');
+    if (authData.length < 37) {
+      return { ok: false, error: 'Datos de autenticación inválidos.' };
+    }
+
+    const rpIdHash = authData.subarray(0, 32);
+    const expectedRpIdHash = crypto
+      .createHash('sha256')
+      .update(params.storedCredential.rpId.toLowerCase())
+      .digest();
+    if (!crypto.timingSafeEqual(rpIdHash, expectedRpIdHash)) {
+      return { ok: false, error: 'El dominio de la huella no coincide.' };
+    }
+
+    const flags = authData[32];
+    const userPresent = (flags & 0x01) !== 0;
+    const userVerified = (flags & 0x04) !== 0;
+    if (!userPresent || !userVerified) {
+      return { ok: false, error: 'Se requiere verificación biométrica del dispositivo.' };
+    }
+
+    const clientDataHash = crypto.createHash('sha256').update(clientDataBuf).digest();
+    const signedPayload = Buffer.concat([authData, clientDataHash]);
+    const signatureBuf = Buffer.from(params.signature, 'base64url');
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(params.storedCredential.publicKeySpkiB64Url, 'base64url'),
+      format: 'der',
+      type: 'spki',
+    });
+
+    const isValid = crypto.verify('sha256', signedPayload, publicKey, signatureBuf);
+    if (!isValid) {
+      return { ok: false, error: 'Huella digital no reconocida.' };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'No se pudo verificar la huella digital.' };
   }
 }
 
@@ -292,7 +509,6 @@ export function checkRateLimit(
   const key = `${bucket}:${ip}`;
 
   if (rateLimitStore.size > 5000) {
-    // Prune stale entries cleanly to avoid unbounded memory growth
     for (const [entryKey, timestamps] of rateLimitStore.entries()) {
       const recent = timestamps.filter((t) => now - t < windowMs);
       if (recent.length === 0) {

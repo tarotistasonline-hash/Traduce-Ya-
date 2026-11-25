@@ -19,9 +19,8 @@ import {
   CheckCircle2,
   Lock,
   Plus,
+  Fingerprint,
 } from 'lucide-react';
-import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { auth } from '../firebase';
 import {
   FREE_TRIAL_LIMIT,
   activateLicenseCode,
@@ -30,7 +29,10 @@ import {
   fetchAdminStatus,
   claimAdminPasscode,
   loginAdminWithPasscode,
-  loginAdminWithFirebase,
+  isBiometricSupported,
+  hasLocalBiometricRegistered,
+  registerAdminBiometric,
+  loginAdminWithBiometric,
   generateCustomerCode,
   fetchCustomerCodes,
   getPaymentConfig,
@@ -81,6 +83,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   const [adminPasscode, setAdminPasscode] = useState('');
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState('');
+  const [bioStatusMsg, setBioStatusMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
@@ -238,29 +241,40 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
     }
   };
 
-  const handleGoogleAdminLogin = async () => {
+  const handleBiometricLogin = async () => {
     setIsAdminLoading(true);
     setAdminError('');
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const cred = await signInWithPopup(auth, provider);
-      const idToken = await cred.user.getIdToken();
-      const res = await loginAdminWithFirebase(idToken);
+      const res = await loginAdminWithBiometric();
       if (res.ok) {
         setIsOwner(true);
         onActivated();
         onClose();
       } else {
-        await signOut(auth).catch(() => {});
-        setAdminError(res.error || 'Cuenta no autorizada.');
+        setAdminError(res.error || 'No se pudo verificar la huella digital.');
       }
-    } catch (err: any) {
-      setAdminError(
-        err?.code === 'auth/popup-closed-by-user'
-          ? 'Se cerró la ventana de Google.'
-          : 'No se pudo iniciar sesión con Google.'
-      );
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleRegisterBiometric = async () => {
+    setIsAdminLoading(true);
+    setBioStatusMsg(null);
+    try {
+      const res = await registerAdminBiometric();
+      if (res.ok) {
+        setAdminStatus((prev) => (prev ? { ...prev, hasBiometricCred: true } : prev));
+        setBioStatusMsg({
+          ok: true,
+          text: '¡Huella digital / Face ID vinculada correctamente!',
+        });
+      } else {
+        setBioStatusMsg({
+          ok: false,
+          text: res.error || 'No se pudo vincular la huella digital.',
+        });
+      }
     } finally {
       setIsAdminLoading(false);
     }
@@ -269,22 +283,27 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
   const handleAdminPasscodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminError('');
-    if (!adminPasscode.trim()) {
-      setAdminError('Ingresa la contraseña de administradora.');
+    const trimmed = adminPasscode.trim();
+    if (!trimmed) {
+      setAdminError('Ingresa tu código secreto de 6 números.');
+      return;
+    }
+    if (adminStatus?.needsSetup && !/^\d{6}$/.test(trimmed)) {
+      setAdminError('Para configurarlo por primera vez, ingresa exactamente 6 números.');
       return;
     }
     setIsAdminLoading(true);
     try {
       const res = adminStatus?.needsSetup
-        ? await claimAdminPasscode(adminPasscode)
-        : await loginAdminWithPasscode(adminPasscode);
+        ? await claimAdminPasscode(trimmed)
+        : await loginAdminWithPasscode(trimmed);
       if (res.ok) {
         setIsOwner(true);
         setAdminPasscode('');
         onActivated();
         onClose();
       } else {
-        setAdminError(res.error || 'Contraseña incorrecta.');
+        setAdminError(res.error || 'Código incorrecto.');
       }
     } finally {
       setIsAdminLoading(false);
@@ -627,44 +646,89 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
                 </p>
 
                 {isOwner ? (
-                  <p className="text-[11px] text-emerald-300 text-center font-medium">
-                    ✓ Sesión verificada como administradora activa.
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-emerald-300 text-center font-medium">
+                      ✓ Sesión verificada como administradora activa.
+                    </p>
+                    {isBiometricSupported() && (
+                      <div className="space-y-1.5">
+                        <button
+                          type="button"
+                          disabled={isAdminLoading}
+                          onClick={handleRegisterBiometric}
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
+                        >
+                          {isAdminLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Fingerprint className="w-4 h-4 text-emerald-400" />
+                          )}
+                          <span>
+                            {hasLocalBiometricRegistered() || adminStatus?.hasBiometricCred
+                              ? 'Actualizar Huella Digital / Face ID'
+                              : 'Vincular Huella Digital / Face ID'}
+                          </span>
+                        </button>
+                        {bioStatusMsg && (
+                          <p
+                            className={`text-[11px] text-center ${
+                              bioStatusMsg.ok ? 'text-emerald-300' : 'text-rose-400'
+                            }`}
+                          >
+                            {bioStatusMsg.text}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-2">
-                    <button
-                      type="button"
-                      disabled={isAdminLoading}
-                      onClick={handleGoogleAdminLogin}
-                      className="w-full py-2 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
-                    >
-                      {isAdminLoading ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    {isBiometricSupported() &&
+                      (hasLocalBiometricRegistered() || adminStatus?.hasBiometricCred) && (
+                        <button
+                          type="button"
+                          disabled={isAdminLoading}
+                          onClick={handleBiometricLogin}
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
+                        >
+                          {isAdminLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Fingerprint className="w-4 h-4 text-emerald-400" />
+                          )}
+                          <span>Ingresar con Huella Digital / Face ID</span>
+                        </button>
                       )}
-                      <span>Entrar con Google (tarotistasonline@gmail.com)</span>
-                    </button>
 
-                    <form onSubmit={handleAdminPasscodeSubmit} className="flex gap-1.5">
-                      <input
-                        type="password"
-                        value={adminPasscode}
-                        onChange={(e) => setAdminPasscode(e.target.value)}
-                        placeholder={
-                          adminStatus?.needsSetup
-                            ? 'Crear contraseña admin (8+ chars)'
-                            : 'Contraseña de administradora'
-                        }
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                      />
-                      <button
-                        type="submit"
-                        disabled={isAdminLoading}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition disabled:opacity-50 shrink-0"
-                      >
-                        {adminStatus?.needsSetup ? 'Configurar' : 'Entrar'}
-                      </button>
+                    <form onSubmit={handleAdminPasscodeSubmit} className="space-y-1.5">
+                      <label className="block text-[10px] text-slate-400">
+                        {adminStatus?.needsSetup
+                          ? 'Primera vez: crea tu código secreto de 6 números:'
+                          : 'Ingresa tu código secreto de 6 números:'}
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          pattern={adminStatus?.needsSetup ? '[0-9]{6}' : undefined}
+                          maxLength={adminStatus?.needsSetup ? 6 : 32}
+                          value={adminPasscode}
+                          onChange={(e) => setAdminPasscode(e.target.value)}
+                          placeholder={
+                            adminStatus?.needsSetup
+                              ? 'Crear código (6 números)'
+                              : '•••••• (6 números)'
+                          }
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 font-mono tracking-widest"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isAdminLoading}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition disabled:opacity-50 shrink-0"
+                        >
+                          {adminStatus?.needsSetup ? 'Crear código' : 'Entrar'}
+                        </button>
+                      </div>
                     </form>
 
                     {adminError && (

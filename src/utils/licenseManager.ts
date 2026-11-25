@@ -1,4 +1,4 @@
-// License, admin session, and usage quota manager for Traduce Ya
+// License, admin session (6-digit PIN + WebAuthn biometrics), and usage quota manager for Traduce Ya
 import { getApiEndpoint } from './apiConfig';
 import {
   isValidGeminiApiKeyFormat,
@@ -17,6 +17,7 @@ const LEGACY_STORAGE_KEY_USAGE = 'traductor_ya_daily_usage_v1';
 const STORAGE_KEY_PAYMENT_URL = 'traductor_ya_custom_payment_url';
 const STORAGE_KEY_PAYMENT_CONFIG = 'traductor_ya_payment_config_v1';
 const STORAGE_KEY_USER_API_KEY = 'traductor_ya_user_api_key_v1';
+const STORAGE_KEY_BIO_CRED = 'traductor_ya_admin_bio_v1';
 
 // Admin session token lives strictly in JS memory (never persisted in localStorage)
 let inMemoryAdminToken = '';
@@ -46,8 +47,32 @@ export interface AdminStatusResponse {
   hasEnvPasscode: boolean;
   hasClaimedPasscode: boolean;
   needsSetup: boolean;
-  firebaseAdminEmail: string;
+  hasBiometricCred: boolean;
   isAuthenticated: boolean;
+}
+
+interface StoredBiometricRecord {
+  credentialId: string;
+  biometricBundle?: string;
+}
+
+function bufferToBase64Url(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToUint8Array(base64url: string): Uint8Array {
+  const padded = base64url.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(base64url.length / 4) * 4, '=');
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 export function getTodayDateString(): string {
@@ -175,7 +200,6 @@ export function getFreeTrialUsage(): number {
       }
     }
 
-    // Migrate legacy daily counter so visitors who already used free phrases keep their usage
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY_USAGE);
     if (legacyRaw) {
       const legacyParsed = JSON.parse(legacyRaw);
@@ -233,7 +257,7 @@ export async function fetchAdminStatus(): Promise<AdminStatusResponse> {
       hasEnvPasscode: false,
       hasClaimedPasscode: false,
       needsSetup: false,
-      firebaseAdminEmail: 'tarotistasonline@gmail.com',
+      hasBiometricCred: hasLocalBiometricRegistered(),
       isAuthenticated: isAdminAuthenticated(),
     };
   }
@@ -244,7 +268,7 @@ export async function fetchAdminStatus(): Promise<AdminStatusResponse> {
     hasEnvPasscode: Boolean(data.hasEnvPasscode),
     hasClaimedPasscode: Boolean(data.hasClaimedPasscode),
     needsSetup: Boolean(data.needsSetup),
-    firebaseAdminEmail: String(data.firebaseAdminEmail || 'tarotistasonline@gmail.com'),
+    hasBiometricCred: Boolean(data.hasBiometricCred),
     isAuthenticated: Boolean(data.isAuthenticated),
   };
 }
@@ -263,7 +287,7 @@ export async function claimAdminPasscode(
       setAdminSessionToken(data.adminToken);
       return { ok: true };
     }
-    return { ok: false, error: data.error || 'No se pudo configurar la contraseña.' };
+    return { ok: false, error: data.error || 'No se pudo configurar el código.' };
   } catch {
     return { ok: false, error: 'Error de conexión con el servidor.' };
   }
@@ -283,29 +307,229 @@ export async function loginAdminWithPasscode(
       setAdminSessionToken(data.adminToken);
       return { ok: true };
     }
-    return { ok: false, error: data.error || 'Contraseña incorrecta.' };
+    return { ok: false, error: data.error || 'Código incorrecto.' };
   } catch {
     return { ok: false, error: 'Error de conexión con el servidor.' };
   }
 }
 
-export async function loginAdminWithFirebase(
-  idToken: string
-): Promise<{ ok: boolean; error?: string }> {
+// ============================================================
+// WebAuthn / Huella Digital / Face ID Helpers (Zero Email)
+// ============================================================
+
+export function isBiometricSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.PublicKeyCredential !== 'undefined' &&
+    Boolean(navigator.credentials?.create) &&
+    Boolean(navigator.credentials?.get)
+  );
+}
+
+function getStoredBiometricRecord(): StoredBiometricRecord | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const res = await fetch(getApiEndpoint('/api/admin/firebase-login'), {
+    const raw = localStorage.getItem(STORAGE_KEY_BIO_CRED);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.credentialId === 'string' && parsed.credentialId) {
+      return parsed as StoredBiometricRecord;
+    }
+  } catch {}
+  return null;
+}
+
+export function hasLocalBiometricRegistered(): boolean {
+  return Boolean(getStoredBiometricRecord()?.credentialId);
+}
+
+export async function registerAdminBiometric(): Promise<{ ok: boolean; error?: string }> {
+  if (!inMemoryAdminToken) {
+    return { ok: false, error: 'Primero ingresa con tu código de 6 dígitos.' };
+  }
+  if (!isBiometricSupported()) {
+    return { ok: false, error: 'Tu navegador no soporta huella digital / Face ID.' };
+  }
+
+  try {
+    const optRes = await fetch(getApiEndpoint('/api/admin/webauthn/register-options'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${inMemoryAdminToken}`,
+      },
+      body: JSON.stringify({}),
+    });
+    const optData = await optRes.json().catch(() => ({}));
+    if (!optRes.ok || !optData.challenge || !optData.challengeToken) {
+      return { ok: false, error: optData.error || 'No se pudo iniciar el registro biométrico.' };
+    }
+
+    const userIdBytes = new TextEncoder().encode('owner-admin');
+    const credential = (await navigator.credentials.create({
+      publicKey: {
+        challenge: base64UrlToUint8Array(optData.challenge) as BufferSource,
+        rp: {
+          name: 'Traduce Ya',
+          id: optData.rpId || window.location.hostname,
+        },
+        user: {
+          id: userIdBytes as BufferSource,
+          name: 'Administradora',
+          displayName: 'Titular Traduce Ya',
+        },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+          residentKey: 'preferred',
+        },
+        timeout: 60000,
+        attestation: 'none',
+      },
+    })) as PublicKeyCredential | null;
+
+    if (!credential) {
+      return { ok: false, error: 'No se creó la credencial biométrica.' };
+    }
+
+    const response = credential.response as AuthenticatorAttestationResponse;
+    if (typeof response.getPublicKey !== 'function' || typeof response.getAuthenticatorData !== 'function') {
+      return {
+        ok: false,
+        error: 'Actualiza Chrome o Safari para registrar la llave biométrica directamente.',
+      };
+    }
+
+    const pubKeyBuf = response.getPublicKey();
+    const authDataBuf = response.getAuthenticatorData();
+    if (!pubKeyBuf || !authDataBuf) {
+      return { ok: false, error: 'El dispositivo no devolvió la llave pública de huella.' };
+    }
+
+    const regRes = await fetch(getApiEndpoint('/api/admin/webauthn/register'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${inMemoryAdminToken}`,
+      },
+      body: JSON.stringify({
+        challengeToken: optData.challengeToken,
+        credentialId: bufferToBase64Url(credential.rawId),
+        publicKeySpkiB64Url: bufferToBase64Url(pubKeyBuf),
+        clientDataJSON: bufferToBase64Url(response.clientDataJSON),
+        authenticatorData: bufferToBase64Url(authDataBuf),
+      }),
+    });
+    const regData = await regRes.json().catch(() => ({}));
+    if (!regRes.ok || !regData.ok) {
+      return { ok: false, error: regData.error || 'No se pudo guardar la huella digital.' };
+    }
+
+    try {
+      localStorage.setItem(
+        STORAGE_KEY_BIO_CRED,
+        JSON.stringify({
+          credentialId: regData.credentialId,
+          biometricBundle: regData.biometricBundle,
+        })
+      );
+    } catch {}
+
+    return { ok: true };
+  } catch (err: any) {
+    const name = err?.name || '';
+    if (name === 'SecurityError' || String(err?.message || '').includes('permissions policy')) {
+      return {
+        ok: false,
+        error: 'La vista previa integrada bloquea la huella. Ábrela en Nueva pestaña / Vercel para activarla.',
+      };
+    }
+    if (name === 'NotAllowedError') {
+      return { ok: false, error: 'Se canceló o venció la lectura de huella digital.' };
+    }
+    return { ok: false, error: 'No se pudo registrar la huella en este dispositivo.' };
+  }
+}
+
+export async function loginAdminWithBiometric(): Promise<{ ok: boolean; error?: string }> {
+  if (!isBiometricSupported()) {
+    return { ok: false, error: 'Tu navegador no soporta verificación por huella digital.' };
+  }
+
+  try {
+    const optRes = await fetch(getApiEndpoint('/api/admin/webauthn/login-options'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
+      body: JSON.stringify({}),
     });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok && typeof data.adminToken === 'string') {
-      setAdminSessionToken(data.adminToken);
+    const optData = await optRes.json().catch(() => ({}));
+    if (!optRes.ok || !optData.challenge || !optData.challengeToken) {
+      return { ok: false, error: optData.error || 'No se pudo iniciar la lectura de huella.' };
+    }
+
+    const stored = getStoredBiometricRecord();
+    const serverIds: string[] = Array.isArray(optData.allowCredentialIds)
+      ? optData.allowCredentialIds
+      : [];
+    const mergedIds = Array.from(
+      new Set([...(stored?.credentialId ? [stored.credentialId] : []), ...serverIds])
+    );
+
+    const allowCredentials: PublicKeyCredentialDescriptor[] = mergedIds.map((id) => ({
+      type: 'public-key',
+      id: base64UrlToUint8Array(id) as BufferSource,
+      transports: ['internal'],
+    }));
+
+    const assertion = (await navigator.credentials.get({
+      publicKey: {
+        challenge: base64UrlToUint8Array(optData.challenge) as BufferSource,
+        rpId: optData.rpId || window.location.hostname,
+        allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    })) as PublicKeyCredential | null;
+
+    if (!assertion) {
+      return { ok: false, error: 'No se recibió respuesta del sensor de huella.' };
+    }
+
+    const authResp = assertion.response as AuthenticatorAssertionResponse;
+    const credentialId = bufferToBase64Url(assertion.rawId);
+
+    const verifyRes = await fetch(getApiEndpoint('/api/admin/webauthn/login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeToken: optData.challengeToken,
+        credentialId,
+        clientDataJSON: bufferToBase64Url(authResp.clientDataJSON),
+        authenticatorData: bufferToBase64Url(authResp.authenticatorData),
+        signature: bufferToBase64Url(authResp.signature),
+        biometricBundle:
+          stored?.credentialId === credentialId ? stored.biometricBundle : undefined,
+      }),
+    });
+    const verifyData = await verifyRes.json().catch(() => ({}));
+    if (verifyRes.ok && verifyData.ok && typeof verifyData.adminToken === 'string') {
+      setAdminSessionToken(verifyData.adminToken);
       return { ok: true };
     }
-    return { ok: false, error: data.error || 'No se pudo validar tu cuenta de Google.' };
-  } catch {
-    return { ok: false, error: 'Error de conexión al verificar la cuenta de Google.' };
+    return { ok: false, error: verifyData.error || 'No se pudo verificar la huella digital.' };
+  } catch (err: any) {
+    const name = err?.name || '';
+    if (name === 'SecurityError' || String(err?.message || '').includes('permissions policy')) {
+      return {
+        ok: false,
+        error: 'En la vista previa el navegador bloquea la huella. Usa Nueva pestaña o ingresa con tu código de 6 dígitos.',
+      };
+    }
+    if (name === 'NotAllowedError') {
+      return { ok: false, error: 'Lectura de huella cancelada o sin coincidencia.' };
+    }
+    return { ok: false, error: 'No se pudo completar el ingreso biométrico.' };
   }
 }
 
@@ -427,14 +651,13 @@ export function getPaymentConfig(): PaymentConfig {
     if (raw) {
       const parsed = JSON.parse(raw);
       const rawPaypal = typeof parsed.paypalAccount === 'string' ? parsed.paypalAccount.trim() : '';
-      const savedPaypal =
-        rawPaypal && rawPaypal !== 'tarotistasonline@gmail.com'
-          ? rawPaypal.startsWith('http') || /^paypal\./i.test(rawPaypal)
-            ? isValidHttpUrl(rawPaypal)
-              ? rawPaypal
-              : ''
-            : sanitizeEmail(rawPaypal, '')
-          : DEFAULT_PAYMENT_CONFIG.paypalAccount;
+      const savedPaypal = rawPaypal
+        ? rawPaypal.startsWith('http') || /^paypal\./i.test(rawPaypal)
+          ? isValidHttpUrl(rawPaypal)
+            ? rawPaypal
+            : ''
+          : sanitizeEmail(rawPaypal, '')
+        : DEFAULT_PAYMENT_CONFIG.paypalAccount;
 
       const rawArs = typeof parsed.arsTarget === 'string' ? parsed.arsTarget.trim() : '';
       const savedArs = rawArs
@@ -445,10 +668,9 @@ export function getPaymentConfig(): PaymentConfig {
 
       const rawContactEmail =
         typeof parsed.contactEmail === 'string' ? parsed.contactEmail.trim() : '';
-      const savedContactEmail =
-        rawContactEmail && rawContactEmail !== 'tarotistasonline@gmail.com'
-          ? sanitizeEmail(rawContactEmail, DEFAULT_PAYMENT_CONFIG.contactEmail)
-          : DEFAULT_PAYMENT_CONFIG.contactEmail;
+      const savedContactEmail = rawContactEmail
+        ? sanitizeEmail(rawContactEmail, DEFAULT_PAYMENT_CONFIG.contactEmail)
+        : DEFAULT_PAYMENT_CONFIG.contactEmail;
 
       return {
         usdPriceLabel:

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   X,
   Volume2,
@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   ExternalLink,
   Eye,
+  EyeOff,
   Users,
   Sun,
   Mic,
@@ -34,9 +35,8 @@ import {
   LogIn,
   LogOut,
   Loader2,
+  Fingerprint,
 } from 'lucide-react';
-import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { auth } from '../firebase';
 import { TranslatorSettings } from '../types/translator';
 import { PWAInstallButton } from './PWAInstallButton';
 import {
@@ -47,7 +47,10 @@ import {
   fetchAdminStatus,
   claimAdminPasscode,
   loginAdminWithPasscode,
-  loginAdminWithFirebase,
+  isBiometricSupported,
+  hasLocalBiometricRegistered,
+  registerAdminBiometric,
+  loginAdminWithBiometric,
   clearAdminSession,
   getAnalyticsOptOut,
   setAnalyticsOptOut,
@@ -99,10 +102,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isAdmin, setIsAdmin] = useState(isAdminAuthenticated);
   const [adminStatus, setAdminStatus] = useState<AdminStatusResponse | null>(null);
   const [showAdminLoginBox, setShowAdminLoginBox] = useState(false);
-  const [adminPasscodeInput, setAdminPasscodeInput] = useState('');
+  const [pinDigits, setPinDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [showPinDigits, setShowPinDigits] = useState(false);
+  const [pinShakeKey, setPinShakeKey] = useState(0);
   const [adminAuthLoading, setAdminAuthLoading] = useState(false);
-  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [adminAuthError, setAdminAuthError] = useState<{
+    title: string;
+    detail: string;
+    highlightEmptyOnly?: boolean;
+  } | null>(null);
+  const [bioStatusMsg, setBioStatusMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [analyticsOptOut, setAnalyticsOptOutState] = useState(getAnalyticsOptOut);
+  const pinInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const [userApiKeyInput, setUserApiKeyInput] = useState(getUserApiKey());
   const [savedApiKeyMsg, setSavedApiKeyMsg] = useState(false);
@@ -128,50 +139,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
   }, [isOpen]);
 
-  const handleGoogleAdminLogin = async () => {
+  const resetPinForm = (focusFirst = false) => {
+    setPinDigits(['', '', '', '', '', '']);
+    setAdminAuthError(null);
+    if (focusFirst) {
+      setTimeout(() => pinInputRefs.current[0]?.focus(), 20);
+    }
+  };
+
+  const triggerPinError = (title: string, detail: string, highlightEmptyOnly = false) => {
+    setAdminAuthError({ title, detail, highlightEmptyOnly });
+    setPinShakeKey((k) => k + 1);
+  };
+
+  const handleBiometricLogin = async () => {
     setAdminAuthLoading(true);
     setAdminAuthError(null);
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const cred = await signInWithPopup(auth, provider);
-      const idToken = await cred.user.getIdToken();
-      const result = await loginAdminWithFirebase(idToken);
+      const result = await loginAdminWithBiometric();
       if (result.ok) {
         setIsAdmin(true);
         setShowAdminLoginBox(false);
+        resetPinForm();
         onAdminStatusChange?.();
         onProStatusChange?.();
       } else {
-        await signOut(auth).catch(() => {});
-        setAdminAuthError(result.error || 'No autorizado para esta cuenta.');
+        triggerPinError(
+          'No se pudo validar la huella',
+          result.error || 'No se pudo verificar la huella digital.'
+        );
       }
-    } catch (err: any) {
-      setAdminAuthError(
-        err?.code === 'auth/popup-closed-by-user'
-          ? 'Se cerró la ventana de inicio de sesión.'
-          : 'No se pudo iniciar sesión con Google en este navegador.'
-      );
     } finally {
       setAdminAuthLoading(false);
     }
   };
 
-  const handlePasscodeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminAuthError(null);
-    if (!adminPasscodeInput.trim()) {
-      setAdminAuthError('Ingresa la contraseña de administradora.');
+  const handleRegisterBiometric = async () => {
+    setAdminAuthLoading(true);
+    setBioStatusMsg(null);
+    try {
+      const result = await registerAdminBiometric();
+      if (result.ok) {
+        setAdminStatus((prev) => (prev ? { ...prev, hasBiometricCred: true } : prev));
+        setBioStatusMsg({
+          ok: true,
+          text: '¡Huella digital / Face ID vinculada! La próxima vez podrás entrar con un toque.',
+        });
+      } else {
+        setBioStatusMsg({
+          ok: false,
+          text: result.error || 'No se pudo vincular la huella digital.',
+        });
+      }
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const submitSixDigitCode = async (code: string) => {
+    if (adminAuthLoading) return;
+    if (!/^\d{6}$/.test(code)) {
+      const remaining = 6 - code.length;
+      triggerPinError(
+        'Código incompleto',
+        remaining > 0
+          ? `Ingresa los 6 números para continuar (te faltan ${remaining}).`
+          : 'El código debe contener exactamente 6 números del 0 al 9.',
+        true
+      );
+      const firstEmptyIdx = pinDigits.findIndex((d) => !d);
+      if (firstEmptyIdx >= 0) {
+        pinInputRefs.current[firstEmptyIdx]?.focus();
+      }
       return;
     }
+
     setAdminAuthLoading(true);
+    setAdminAuthError(null);
     try {
       const result = adminStatus?.needsSetup
-        ? await claimAdminPasscode(adminPasscodeInput)
-        : await loginAdminWithPasscode(adminPasscodeInput);
+        ? await claimAdminPasscode(code)
+        : await loginAdminWithPasscode(code);
       if (result.ok) {
         setIsAdmin(true);
-        setAdminPasscodeInput('');
+        resetPinForm();
         setShowAdminLoginBox(false);
         setAdminStatus((prev) =>
           prev ? { ...prev, needsSetup: false, hasClaimedPasscode: true, isAuthenticated: true } : prev
@@ -179,18 +230,132 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         onAdminStatusChange?.();
         onProStatusChange?.();
       } else {
-        setAdminAuthError(result.error || 'No se pudo verificar la contraseña.');
+        triggerPinError(
+          'Código incorrecto',
+          result.error || 'El código de 6 dígitos no coincide. Revisa los números e inténtalo nuevamente.'
+        );
+        setTimeout(() => {
+          pinInputRefs.current[5]?.focus();
+          pinInputRefs.current[5]?.select();
+        }, 30);
       }
     } finally {
       setAdminAuthLoading(false);
     }
   };
 
-  const handleAdminLogout = async () => {
-    clearAdminSession();
-    await signOut(auth).catch(() => {});
-    setIsAdmin(false);
+  const handlePasscodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitSixDigitCode(pinDigits.join(''));
+  };
+
+  const handleDigitChange = (idx: number, rawValue: string) => {
+    if (adminAuthLoading) return;
+    const onlyDigits = rawValue.replace(/\D/g, '');
+
+    if (rawValue !== '' && onlyDigits === '') {
+      triggerPinError('Solo números', 'Cada casilla acepta únicamente dígitos del 0 al 9.', false);
+      return;
+    }
+
     setAdminAuthError(null);
+
+    if (onlyDigits.length === 2 && pinDigits[idx].length === 1) {
+      const replacementDigit = onlyDigits[0] === pinDigits[idx] ? onlyDigits[1] : onlyDigits[0];
+      const next = [...pinDigits];
+      next[idx] = replacementDigit;
+      setPinDigits(next);
+      if (idx < 5) {
+        pinInputRefs.current[idx + 1]?.focus();
+      }
+      if (!adminStatus?.needsSetup && next.every((d) => /^\d$/.test(d))) {
+        void submitSixDigitCode(next.join(''));
+      }
+      return;
+    }
+
+    if (onlyDigits.length > 1) {
+      const next = [...pinDigits];
+      const chars = onlyDigits.slice(0, 6 - idx).split('');
+      chars.forEach((ch, offset) => {
+        next[idx + offset] = ch;
+      });
+      setPinDigits(next);
+      const nextFocus = Math.min(5, idx + chars.length);
+      pinInputRefs.current[nextFocus]?.focus();
+      if (!adminStatus?.needsSetup && next.every((d) => /^\d$/.test(d))) {
+        void submitSixDigitCode(next.join(''));
+      }
+      return;
+    }
+
+    const next = [...pinDigits];
+    next[idx] = onlyDigits;
+    setPinDigits(next);
+
+    if (onlyDigits && idx < 5) {
+      pinInputRefs.current[idx + 1]?.focus();
+    }
+
+    if (onlyDigits && !adminStatus?.needsSetup && next.every((d) => /^\d$/.test(d))) {
+      void submitSixDigitCode(next.join(''));
+    }
+  };
+
+  const handleDigitKeyDown = (idx: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (adminAuthLoading) return;
+    if (e.key === 'Backspace') {
+      setAdminAuthError(null);
+      if (pinDigits[idx]) {
+        const next = [...pinDigits];
+        next[idx] = '';
+        setPinDigits(next);
+      } else if (idx > 0) {
+        const next = [...pinDigits];
+        next[idx - 1] = '';
+        setPinDigits(next);
+        pinInputRefs.current[idx - 1]?.focus();
+      }
+      e.preventDefault();
+    } else if (e.key === 'ArrowLeft' && idx > 0) {
+      pinInputRefs.current[idx - 1]?.focus();
+      e.preventDefault();
+    } else if (e.key === 'ArrowRight' && idx < 5) {
+      pinInputRefs.current[idx + 1]?.focus();
+      e.preventDefault();
+    }
+  };
+
+  const handleDigitPaste = (idx: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    if (adminAuthLoading) return;
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '');
+    if (!pasted) {
+      triggerPinError('Formato inválido', 'El texto pegado no contiene números.');
+      return;
+    }
+    setAdminAuthError(null);
+    const next = [...pinDigits];
+    const chars = pasted.slice(0, 6).split('');
+    const startIdx = pasted.length >= 6 ? 0 : idx;
+    chars.forEach((ch, offset) => {
+      if (startIdx + offset < 6) {
+        next[startIdx + offset] = ch;
+      }
+    });
+    setPinDigits(next);
+    const targetIdx = Math.min(5, startIdx + chars.length - 1);
+    pinInputRefs.current[targetIdx]?.focus();
+    if (!adminStatus?.needsSetup && next.every((d) => /^\d$/.test(d))) {
+      void submitSixDigitCode(next.join(''));
+    }
+  };
+
+  const handleAdminLogout = () => {
+    clearAdminSession();
+    setIsAdmin(false);
+    resetPinForm();
+    setBioStatusMsg(null);
     onAdminStatusChange?.();
     onProStatusChange?.();
   };
@@ -478,7 +643,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <p className="text-[10px] text-slate-400 leading-tight">
                         {isAdmin
                           ? 'Sesión verificada activa (Buzón privado y acceso ilimitado).'
-                          : `Solo para la titular (${adminStatus?.firebaseAdminEmail || 'tarotistasonline@gmail.com'}).`}
+                          : 'Acceso privado con código de 6 números o huella digital.'}
                       </p>
                     </div>
                   </div>
@@ -494,58 +659,216 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setShowAdminLoginBox((v) => !v)}
+                      onClick={() => {
+                        setShowAdminLoginBox((prev) => {
+                          const next = !prev;
+                          if (next) {
+                            resetPinForm(true);
+                          } else {
+                            setAdminAuthError(null);
+                          }
+                          return next;
+                        });
+                      }}
                       className="px-2.5 py-1 rounded-lg text-[11px] font-bold border bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700 transition flex items-center gap-1 shrink-0"
                     >
                       <LogIn className="w-3 h-3" />
-                      <span>Iniciar sesión</span>
+                      <span>{showAdminLoginBox ? 'Ocultar' : 'Ingresar'}</span>
                     </button>
                   )}
                 </div>
 
-                {!isAdmin && showAdminLoginBox && (
-                  <div className="p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/30 space-y-2.5">
+                {isAdmin && isBiometricSupported() && (
+                  <div className="p-2.5 rounded-xl bg-slate-950/70 border border-emerald-500/25 space-y-1.5">
                     <button
                       type="button"
                       disabled={adminAuthLoading}
-                      onClick={handleGoogleAdminLogin}
-                      className="w-full py-2 px-3 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
+                      onClick={handleRegisterBiometric}
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
                     >
                       {adminAuthLoading ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                        <Fingerprint className="w-4 h-4 text-emerald-400" />
                       )}
-                      <span>Entrar con Google (tarotistasonline@gmail.com)</span>
+                      <span>
+                        {hasLocalBiometricRegistered() || adminStatus?.hasBiometricCred
+                          ? 'Actualizar Huella Digital / Face ID en este dispositivo'
+                          : 'Vincular Huella Digital / Face ID para entrar sin código'}
+                      </span>
                     </button>
+                    {bioStatusMsg && (
+                      <p
+                        className={`text-[11px] text-center ${
+                          bioStatusMsg.ok ? 'text-emerald-300' : 'text-rose-400'
+                        }`}
+                      >
+                        {bioStatusMsg.text}
+                      </p>
+                    )}
+                  </div>
+                )}
 
-                    <form onSubmit={handlePasscodeSubmit} className="space-y-1.5 pt-1.5 border-t border-slate-800">
-                      <label className="block text-[10px] text-slate-400">
-                        {adminStatus?.needsSetup
-                          ? 'Primera vez: define tu contraseña secreta de administradora (mín. 8 caracteres):'
-                          : 'O ingresa con tu contraseña de administradora:'}
-                      </label>
+                {!isAdmin && showAdminLoginBox && (
+                  <div
+                    className={`p-3 rounded-xl border transition-colors space-y-3 ${
+                      adminAuthError
+                        ? 'bg-rose-950/25 border-rose-500/70 shadow-lg shadow-rose-950/30'
+                        : 'bg-slate-950/85 border-amber-500/30'
+                    }`}
+                  >
+                    {isBiometricSupported() &&
+                      (hasLocalBiometricRegistered() || adminStatus?.hasBiometricCred) && (
+                        <button
+                          type="button"
+                          disabled={adminAuthLoading}
+                          onClick={handleBiometricLogin}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-xs flex items-center justify-center gap-2 transition disabled:opacity-50"
+                        >
+                          {adminAuthLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Fingerprint className="w-4 h-4 text-emerald-400" />
+                          )}
+                          <span>Ingresar con Huella Digital / Face ID</span>
+                        </button>
+                      )}
+
+                    <form
+                      onSubmit={handlePasscodeSubmit}
+                      className={`space-y-2.5 ${
+                        isBiometricSupported() &&
+                        (hasLocalBiometricRegistered() || adminStatus?.hasBiometricCred)
+                          ? 'pt-2 border-t border-slate-800'
+                          : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-semibold text-slate-200">
+                          {adminStatus?.needsSetup
+                            ? 'Primera vez: crea tu código de 6 dígitos'
+                            : 'Validación de acceso (6 dígitos)'}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+                              adminAuthError
+                                ? 'text-rose-300 bg-rose-500/15 border-rose-500/40'
+                                : pinDigits.filter(Boolean).length === 6
+                                ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40'
+                                : 'text-slate-400 bg-slate-900 border-slate-700'
+                            }`}
+                          >
+                            {pinDigits.filter(Boolean).length}/6
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowPinDigits((v) => !v)}
+                            className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+                            title={showPinDigits ? 'Ocultar dígitos' : 'Ver dígitos'}
+                            aria-label={showPinDigits ? 'Ocultar dígitos' : 'Ver dígitos'}
+                          >
+                            {showPinDigits ? (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 6-Digit PIN Boxes */}
+                      <div
+                        key={pinShakeKey}
+                        className={`grid grid-cols-6 gap-1.5 ${
+                          adminAuthError ? 'animate-pin-shake' : ''
+                        }`}
+                      >
+                        {pinDigits.map((digit, idx) => {
+                          const isBoxError =
+                            Boolean(adminAuthError) &&
+                            (!adminAuthError?.highlightEmptyOnly || !digit);
+                          return (
+                            <input
+                              key={idx}
+                              ref={(el) => {
+                                pinInputRefs.current[idx] = el;
+                              }}
+                              type={showPinDigits ? 'text' : 'password'}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              maxLength={6}
+                              autoComplete="one-time-code"
+                              disabled={adminAuthLoading}
+                              value={digit}
+                              onChange={(e) => handleDigitChange(idx, e.target.value)}
+                              onKeyDown={(e) => handleDigitKeyDown(idx, e)}
+                              onPaste={(e) => handleDigitPaste(idx, e)}
+                              onFocus={(e) => e.target.select()}
+                              aria-label={`Dígito ${idx + 1} de 6`}
+                              aria-invalid={isBoxError}
+                              placeholder="•"
+                              className={`w-full h-10 text-center text-base font-mono font-bold rounded-xl border transition-all focus:outline-none disabled:opacity-50 ${
+                                isBoxError
+                                  ? 'bg-rose-950/60 border-rose-500 text-rose-100 placeholder-rose-400/70 ring-2 ring-rose-500/30 focus:border-rose-400'
+                                  : digit
+                                  ? 'bg-slate-900 border-amber-400/70 text-amber-200 focus:border-amber-300 focus:ring-2 focus:ring-amber-400/30'
+                                  : 'bg-slate-900 border-slate-700 text-white placeholder-slate-600 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/25'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {adminAuthError && (
+                        <div
+                          role="alert"
+                          aria-live="assertive"
+                          className="flex items-start gap-2 p-2.5 rounded-xl bg-rose-950/75 border border-rose-500/60 text-rose-200 text-[11px] leading-snug"
+                        >
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="font-bold text-rose-300">{adminAuthError.title}</p>
+                            <p>{adminAuthError.detail}</p>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex gap-1.5">
-                        <input
-                          type="password"
-                          value={adminPasscodeInput}
-                          onChange={(e) => setAdminPasscodeInput(e.target.value)}
-                          placeholder={adminStatus?.needsSetup ? 'Nueva contraseña (8+ caracteres)' : 'Contraseña de administradora'}
-                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                        />
+                        {pinDigits.some(Boolean) && (
+                          <button
+                            type="button"
+                            disabled={adminAuthLoading}
+                            onClick={() => resetPinForm(true)}
+                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            Limpiar
+                          </button>
+                        )}
                         <button
                           type="submit"
                           disabled={adminAuthLoading}
-                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition disabled:opacity-50 shrink-0"
+                          className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 ${
+                            adminAuthError
+                              ? 'bg-rose-500 hover:bg-rose-400 text-white'
+                              : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          }`}
                         >
-                          {adminStatus?.needsSetup ? 'Configurar' : 'Entrar'}
+                          {adminAuthLoading ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Verificando código...</span>
+                            </>
+                          ) : (
+                            <span>
+                              {adminStatus?.needsSetup
+                                ? 'Guardar código de 6 dígitos'
+                                : 'Verificar código'}
+                            </span>
+                          )}
                         </button>
                       </div>
                     </form>
-
-                    {adminAuthError && (
-                      <p className="text-[11px] text-rose-400">{adminAuthError}</p>
-                    )}
                   </div>
                 )}
               </div>

@@ -5,25 +5,31 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
-  ADMIN_EMAIL,
   checkRateLimit,
   constantTimeEqual,
+  createWebAuthnChallenge,
   generateSignedCustomerCode,
   getClientIp,
   getEnvCustomerCodes,
-  getFirebaseWebApiKey,
+  getEnvWebAuthnCredentials,
+  getRequestHostname,
   hashPasscodeScrypt,
+  isValidAdminPasscode,
   isVerifiedAdminRequest,
   isVerifiedProOrAdminRequest,
   sameOriginGuard,
   securityHeadersMiddleware,
+  signBiometricBundle,
   signSessionToken,
+  StoredWebAuthnCredential,
   validateAudioPayload,
   validateCustomGeminiKey,
   validateTranslateBody,
-  verifyFirebaseAdminIdToken,
+  verifyBiometricBundle,
   verifyPasscodeScrypt,
   verifySignedCustomerCode,
+  verifyWebAuthnAssertion,
+  verifyWebAuthnRegistration,
 } from './api/_security.ts';
 
 dotenv.config();
@@ -99,24 +105,63 @@ function resolveAiClient(req?: express.Request):
   return { ok: true, ai: aiClient, usingCustomKey: false };
 }
 
-function readClaimedAdminHash(): string | null {
+interface AdminAuthStore {
+  passcodeHash?: string;
+  webauthnCredentials?: StoredWebAuthnCredential[];
+  updatedAt?: number;
+}
+
+function readAdminAuthStore(): AdminAuthStore {
   try {
     if (fs.existsSync(ADMIN_AUTH_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(ADMIN_AUTH_FILE, 'utf8'));
-      if (typeof parsed?.passcodeHash === 'string' && parsed.passcodeHash.startsWith('scrypt$')) {
-        return parsed.passcodeHash;
+      if (parsed && typeof parsed === 'object') {
+        return parsed as AdminAuthStore;
       }
     }
   } catch {}
+  return {};
+}
+
+function writeAdminAuthStore(next: AdminAuthStore) {
+  fs.writeFileSync(
+    ADMIN_AUTH_FILE,
+    JSON.stringify({ ...next, updatedAt: Date.now() }, null, 2),
+    { encoding: 'utf8', mode: 0o600 }
+  );
+}
+
+function readClaimedAdminHash(): string | null {
+  const store = readAdminAuthStore();
+  if (typeof store.passcodeHash === 'string' && store.passcodeHash.startsWith('scrypt$')) {
+    return store.passcodeHash;
+  }
   return null;
 }
 
 function writeClaimedAdminHash(passcodeHash: string) {
-  fs.writeFileSync(
-    ADMIN_AUTH_FILE,
-    JSON.stringify({ passcodeHash, updatedAt: Date.now() }, null, 2),
-    { encoding: 'utf8', mode: 0o600 }
-  );
+  const store = readAdminAuthStore();
+  writeAdminAuthStore({ ...store, passcodeHash });
+}
+
+function getAllWebAuthnCredentials(): StoredWebAuthnCredential[] {
+  const storeCreds = Array.isArray(readAdminAuthStore().webauthnCredentials)
+    ? readAdminAuthStore().webauthnCredentials!
+    : [];
+  const envCreds = getEnvWebAuthnCredentials();
+  const byId = new Map<string, StoredWebAuthnCredential>();
+  for (const c of [...envCreds, ...storeCreds]) {
+    if (c?.credentialId) byId.set(c.credentialId, c);
+  }
+  return Array.from(byId.values());
+}
+
+function saveWebAuthnCredential(cred: StoredWebAuthnCredential) {
+  const store = readAdminAuthStore();
+  const existing = Array.isArray(store.webauthnCredentials) ? store.webauthnCredentials : [];
+  const filtered = existing.filter((c) => c.credentialId !== cred.credentialId);
+  filtered.unshift(cred);
+  writeAdminAuthStore({ ...store, webauthnCredentials: filtered.slice(0, 10) });
 }
 
 function readStoredCustomerCodes(): string[] {
@@ -185,22 +230,23 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Admin Auth & Customer Code Verification Endpoints
+// Admin Auth (6-digit PIN + Biometric WebAuthn) & Customer Code Verification Endpoints
 app.get('/api/admin/status', (req, res) => {
   const hasEnvPasscode = Boolean(process.env.ADMIN_PASSCODE?.trim());
   const hasClaimedPasscode = Boolean(readClaimedAdminHash());
+  const webauthnCreds = getAllWebAuthnCredentials();
   return res.json({
     hasEnvPasscode,
     hasClaimedPasscode,
     needsSetup: !hasEnvPasscode && !hasClaimedPasscode,
-    firebaseAdminEmail: ADMIN_EMAIL,
+    hasBiometricCred: webauthnCreds.length > 0,
     isAuthenticated: isVerifiedAdminRequest(req),
   });
 });
 
 app.post('/api/admin/claim', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
       error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
@@ -208,31 +254,31 @@ app.post('/api/admin/claim', (req, res) => {
   }
 
   if (process.env.ADMIN_PASSCODE?.trim() || readClaimedAdminHash()) {
-    return res.status(409).json({ error: 'La contraseña de administradora ya está configurada.' });
+    return res.status(409).json({ error: 'El código de administradora ya está configurado.' });
   }
 
   const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
-  if (rawPasscode.length < 8 || rawPasscode.length > 128) {
-    return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 128 caracteres.' });
+  if (!isValidAdminPasscode(rawPasscode)) {
+    return res.status(400).json({ error: 'Ingresa un código de 6 números (o una clave de al menos 6 caracteres).' });
   }
 
   writeClaimedAdminHash(hashPasscodeScrypt(rawPasscode));
-  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
 app.post('/api/admin/login', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
-      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
+      error: `Demasiados intentos fallidos. Espera ${limit.retryAfterSec} segundos antes de reintentar.`,
     });
   }
 
   const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
   if (!rawPasscode) {
-    return res.status(400).json({ error: 'Ingresa la contraseña de administradora.' });
+    return res.status(400).json({ error: 'Ingresa tu código secreto de administradora.' });
   }
 
   const envPasscode = process.env.ADMIN_PASSCODE?.trim();
@@ -244,34 +290,112 @@ app.post('/api/admin/login', (req, res) => {
     verified = verifyPasscodeScrypt(rawPasscode, claimedHash);
   } else {
     return res.status(403).json({
-      error: 'Configura una contraseña inicial o inicia sesión con Google (tarotistasonline@gmail.com).',
+      error: 'Primero configura tu código de 6 dígitos.',
     });
   }
 
   if (!verified) {
-    return res.status(401).json({ error: 'Contraseña incorrecta.' });
+    return res.status(401).json({ error: 'Código incorrecto.' });
   }
 
-  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
-app.post('/api/admin/firebase-login', async (req, res) => {
+app.post('/api/admin/webauthn/register-options', requireAdmin, (req, res) => {
+  const { challenge, challengeToken } = createWebAuthnChallenge('register');
+  return res.json({
+    ok: true,
+    challenge,
+    challengeToken,
+    rpId: getRequestHostname(req),
+  });
+});
+
+app.post('/api/admin/webauthn/register', requireAdmin, (req, res) => {
+  const result = verifyWebAuthnRegistration({
+    challengeToken: req.body?.challengeToken,
+    expectedHostname: getRequestHostname(req),
+    credentialId: req.body?.credentialId,
+    publicKeySpkiB64Url: req.body?.publicKeySpkiB64Url,
+    clientDataJSON: req.body?.clientDataJSON,
+    authenticatorData: req.body?.authenticatorData,
+  });
+
+  if (!result.ok) {
+    return res.status(400).json({ ok: false, error: result.error });
+  }
+
+  saveWebAuthnCredential(result.credential);
+  const biometricBundle = signBiometricBundle(result.credential);
+  return res.json({
+    ok: true,
+    credentialId: result.credential.credentialId,
+    biometricBundle,
+  });
+});
+
+app.post('/api/admin/webauthn/login-options', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-bio', ip, 10, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
-      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos.`,
+      error: `Demasiados intentos biométricos. Espera ${limit.retryAfterSec} segundos.`,
     });
   }
 
-  const idToken = typeof req.body?.idToken === 'string' ? req.body.idToken.trim() : '';
-  const check = await verifyFirebaseAdminIdToken(idToken, getFirebaseWebApiKey());
-  if (!check.ok) {
-    return res.status(401).json({ error: check.error });
+  const { challenge, challengeToken } = createWebAuthnChallenge('auth');
+  const creds = getAllWebAuthnCredentials();
+  return res.json({
+    ok: true,
+    challenge,
+    challengeToken,
+    rpId: getRequestHostname(req),
+    allowCredentialIds: creds.map((c) => c.credentialId),
+  });
+});
+
+app.post('/api/admin/webauthn/login', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados intentos fallidos. Espera ${limit.retryAfterSec} segundos.`,
+    });
   }
 
-  const adminToken = signSessionToken('admin', check.email);
+  const credentialId = typeof req.body?.credentialId === 'string' ? req.body.credentialId : '';
+  const serverCreds = getAllWebAuthnCredentials();
+  let matchedCred = serverCreds.find((c) => c.credentialId === credentialId) || null;
+
+  if (!matchedCred && req.body?.biometricBundle) {
+    const verifiedBundle = verifyBiometricBundle(req.body.biometricBundle);
+    if (verifiedBundle && verifiedBundle.credentialId === credentialId) {
+      matchedCred = verifiedBundle;
+    }
+  }
+
+  if (!matchedCred) {
+    return res.status(401).json({
+      ok: false,
+      error: 'Esta huella digital no está registrada en este servidor. Ingresa con tu código de 6 dígitos y vuelve a vincularla.',
+    });
+  }
+
+  const verification = verifyWebAuthnAssertion({
+    challengeToken: req.body?.challengeToken,
+    expectedHostname: getRequestHostname(req),
+    storedCredential: matchedCred,
+    clientDataJSON: req.body?.clientDataJSON,
+    authenticatorData: req.body?.authenticatorData,
+    signature: req.body?.signature,
+  });
+
+  if (!verification.ok) {
+    return res.status(401).json({ ok: false, error: verification.error });
+  }
+
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
@@ -295,7 +419,7 @@ app.post('/api/admin/codes', requireAdmin, (_req, res) => {
 
 app.post('/api/activate-code', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('activate-code', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('activate-code', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
       ok: false,
@@ -314,7 +438,7 @@ app.post('/api/activate-code', (req, res) => {
     (envAdminPass && constantTimeEqual(rawCode, envAdminPass)) ||
     (claimedHash && verifyPasscodeScrypt(rawCode, claimedHash))
   ) {
-    const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+    const adminToken = signSessionToken('admin', 'owner');
     return res.json({ ok: true, role: 'admin', adminToken });
   }
 

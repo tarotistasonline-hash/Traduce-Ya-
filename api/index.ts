@@ -1,26 +1,32 @@
 import express from 'express';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
-  ADMIN_EMAIL,
   checkRateLimit,
   constantTimeEqual,
+  createWebAuthnChallenge,
   generateSignedCustomerCode,
   getClientIp,
   getEnvCustomerCodes,
-  getFirebaseWebApiKey,
+  getEnvWebAuthnCredentials,
+  getRequestHostname,
   hashPasscodeScrypt,
+  isValidAdminPasscode,
   isVerifiedAdminRequest,
   isVerifiedProOrAdminRequest,
   sameOriginGuard,
   sanitizeFallbackApiPath,
   securityHeadersMiddleware,
+  signBiometricBundle,
   signSessionToken,
+  StoredWebAuthnCredential,
   validateAudioPayload,
   validateCustomGeminiKey,
   validateTranslateBody,
-  verifyFirebaseAdminIdToken,
+  verifyBiometricBundle,
   verifyPasscodeScrypt,
   verifySignedCustomerCode,
+  verifyWebAuthnAssertion,
+  verifyWebAuthnRegistration,
 } from './_security';
 
 const FALLBACK_API_ORIGIN = 'https://traductor-ya-traductor-de-voz-y-conversaci-n.ai.studio';
@@ -66,6 +72,15 @@ app.use('/api', (req, res, next) => {
 let aiClient: GoogleGenAI | null = null;
 let cachedApiKey: string | undefined = undefined;
 let claimedAdminHash: string | null = null;
+const memoryWebAuthnCreds: StoredWebAuthnCredential[] = [];
+
+function getServerlessWebAuthnCreds(): StoredWebAuthnCredential[] {
+  const byId = new Map<string, StoredWebAuthnCredential>();
+  for (const c of [...getEnvWebAuthnCredentials(), ...memoryWebAuthnCreds]) {
+    if (c?.credentialId) byId.set(c.credentialId, c);
+  }
+  return Array.from(byId.values());
+}
 
 function resolveAiClient(req: express.Request):
   | { ok: true; ai: GoogleGenAI | null; usingCustomKey: boolean }
@@ -185,7 +200,7 @@ app.get('/api/status', (_req, res) => {
   });
 });
 
-// Admin authentication & setup status
+// Admin authentication (6-digit PIN + Biometric WebAuthn) & setup status
 app.get('/api/admin/status', (req, res) => {
   const hasEnvPasscode = Boolean(process.env.ADMIN_PASSCODE?.trim());
   const hasClaimedPasscode = Boolean(claimedAdminHash);
@@ -193,15 +208,15 @@ app.get('/api/admin/status', (req, res) => {
     hasEnvPasscode,
     hasClaimedPasscode,
     needsSetup: !hasEnvPasscode && !hasClaimedPasscode,
-    firebaseAdminEmail: ADMIN_EMAIL,
+    hasBiometricCred: getServerlessWebAuthnCreds().length > 0,
     isAuthenticated: isVerifiedAdminRequest(req),
   });
 });
 
-// First-run admin password claim (only active when ADMIN_PASSCODE env var is unset and unclaimed)
+// First-run admin code claim (only active when ADMIN_PASSCODE env var is unset and unclaimed)
 app.post('/api/admin/claim', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
       error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
@@ -209,31 +224,31 @@ app.post('/api/admin/claim', (req, res) => {
   }
 
   if (process.env.ADMIN_PASSCODE?.trim() || claimedAdminHash) {
-    return res.status(409).json({ error: 'La contraseña de administradora ya está configurada.' });
+    return res.status(409).json({ error: 'El código de administradora ya está configurado.' });
   }
 
   const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
-  if (rawPasscode.length < 8 || rawPasscode.length > 128) {
-    return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 128 caracteres.' });
+  if (!isValidAdminPasscode(rawPasscode)) {
+    return res.status(400).json({ error: 'Ingresa un código de 6 números (o una clave de al menos 6 caracteres).' });
   }
 
   claimedAdminHash = hashPasscodeScrypt(rawPasscode);
-  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
 app.post('/api/admin/login', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
-      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos antes de volver a intentar.`,
+      error: `Demasiados intentos fallidos. Espera ${limit.retryAfterSec} segundos antes de reintentar.`,
     });
   }
 
   const rawPasscode = typeof req.body?.passcode === 'string' ? req.body.passcode.trim() : '';
   if (!rawPasscode) {
-    return res.status(400).json({ error: 'Ingresa la contraseña de administradora.' });
+    return res.status(400).json({ error: 'Ingresa tu código secreto de administradora.' });
   }
 
   const envPasscode = process.env.ADMIN_PASSCODE?.trim();
@@ -241,37 +256,119 @@ app.post('/api/admin/login', (req, res) => {
   if (envPasscode) {
     verified = constantTimeEqual(rawPasscode, envPasscode);
   } else if (claimedAdminHash) {
-    verified = verifyPasscodeScrypt(rawPasscode, claimedAdminHash);
+    verified = verifyPasscodeScrypt(rawPasscode, claimedHashSafe(claimedAdminHash));
   } else {
     return res.status(403).json({
-      error: 'Configura una contraseña inicial o inicia sesión con Google (tarotistasonline@gmail.com).',
+      error: 'Primero configura tu código de 6 dígitos.',
     });
   }
 
   if (!verified) {
-    return res.status(401).json({ error: 'Contraseña incorrecta.' });
+    return res.status(401).json({ error: 'Código incorrecto.' });
   }
 
-  const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
-app.post('/api/admin/firebase-login', async (req, res) => {
+function claimedHashSafe(v: string): string {
+  return v;
+}
+
+app.post('/api/admin/webauthn/register-options', requireAdmin, (req, res) => {
+  const { challenge, challengeToken } = createWebAuthnChallenge('register');
+  return res.json({
+    ok: true,
+    challenge,
+    challengeToken,
+    rpId: getRequestHostname(req),
+  });
+});
+
+app.post('/api/admin/webauthn/register', requireAdmin, (req, res) => {
+  const result = verifyWebAuthnRegistration({
+    challengeToken: req.body?.challengeToken,
+    expectedHostname: getRequestHostname(req),
+    credentialId: req.body?.credentialId,
+    publicKeySpkiB64Url: req.body?.publicKeySpkiB64Url,
+    clientDataJSON: req.body?.clientDataJSON,
+    authenticatorData: req.body?.authenticatorData,
+  });
+
+  if (!result.ok) {
+    return res.status(400).json({ ok: false, error: result.error });
+  }
+
+  memoryWebAuthnCreds.unshift(result.credential);
+  const biometricBundle = signBiometricBundle(result.credential);
+  return res.json({
+    ok: true,
+    credentialId: result.credential.credentialId,
+    biometricBundle,
+  });
+});
+
+app.post('/api/admin/webauthn/login-options', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('admin-auth', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('admin-bio', ip, 10, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
-      error: `Demasiados intentos. Espera ${limit.retryAfterSec} segundos.`,
+      error: `Demasiados intentos biométricos. Espera ${limit.retryAfterSec} segundos.`,
     });
   }
 
-  const idToken = typeof req.body?.idToken === 'string' ? req.body.idToken.trim() : '';
-  const check = await verifyFirebaseAdminIdToken(idToken, getFirebaseWebApiKey());
-  if (!check.ok) {
-    return res.status(401).json({ error: check.error });
+  const { challenge, challengeToken } = createWebAuthnChallenge('auth');
+  const creds = getServerlessWebAuthnCreds();
+  return res.json({
+    ok: true,
+    challenge,
+    challengeToken,
+    rpId: getRequestHostname(req),
+    allowCredentialIds: creds.map((c) => c.credentialId),
+  });
+});
+
+app.post('/api/admin/webauthn/login', (req, res) => {
+  const ip = getClientIp(req);
+  const limit = checkRateLimit('admin-auth', ip, 5, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    return res.status(429).json({
+      error: `Demasiados intentos fallidos. Espera ${limit.retryAfterSec} segundos.`,
+    });
   }
 
-  const adminToken = signSessionToken('admin', check.email);
+  const credentialId = typeof req.body?.credentialId === 'string' ? req.body.credentialId : '';
+  const serverCreds = getServerlessWebAuthnCreds();
+  let matchedCred = serverCreds.find((c) => c.credentialId === credentialId) || null;
+
+  if (!matchedCred && req.body?.biometricBundle) {
+    const verifiedBundle = verifyBiometricBundle(req.body.biometricBundle);
+    if (verifiedBundle && verifiedBundle.credentialId === credentialId) {
+      matchedCred = verifiedBundle;
+    }
+  }
+
+  if (!matchedCred) {
+    return res.status(401).json({
+      ok: false,
+      error: 'Esta huella digital no está registrada en este servidor. Ingresa con tu código de 6 dígitos y vuelve a vincularla.',
+    });
+  }
+
+  const verification = verifyWebAuthnAssertion({
+    challengeToken: req.body?.challengeToken,
+    expectedHostname: getRequestHostname(req),
+    storedCredential: matchedCred,
+    clientDataJSON: req.body?.clientDataJSON,
+    authenticatorData: req.body?.authenticatorData,
+    signature: req.body?.signature,
+  });
+
+  if (!verification.ok) {
+    return res.status(401).json({ ok: false, error: verification.error });
+  }
+
+  const adminToken = signSessionToken('admin', 'owner');
   return res.json({ ok: true, adminToken });
 });
 
@@ -286,7 +383,7 @@ app.post('/api/admin/codes', requireAdmin, (_req, res) => {
 
 app.post('/api/activate-code', (req, res) => {
   const ip = getClientIp(req);
-  const limit = checkRateLimit('activate-code', ip, 10, 15 * 60 * 1000);
+  const limit = checkRateLimit('activate-code', ip, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return res.status(429).json({
       ok: false,
@@ -304,7 +401,7 @@ app.post('/api/activate-code', (req, res) => {
     (envAdminPass && constantTimeEqual(rawCode, envAdminPass)) ||
     (claimedAdminHash && verifyPasscodeScrypt(rawCode, claimedAdminHash))
   ) {
-    const adminToken = signSessionToken('admin', ADMIN_EMAIL);
+    const adminToken = signSessionToken('admin', 'owner');
     return res.json({ ok: true, role: 'admin', adminToken });
   }
 
