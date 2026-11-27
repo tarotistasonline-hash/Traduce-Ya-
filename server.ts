@@ -1011,13 +1011,13 @@ Return ONLY compact JSON:
     }
 
     if (!response) {
-      const status = isQuotaError(lastError) ? 429 : isUnavailableError(lastError) ? 503 : 500;
-      const message = isQuotaError(lastError)
-        ? 'Se alcanzó el límite de solicitudes de traducción de audio. Espera un momento o usa el micrófono nuevamente.'
-        : isUnavailableError(lastError)
-        ? 'El motor de traducción de audio está con alta demanda temporal. Intenta de nuevo en unos segundos.'
-        : 'No se pudo procesar el audio en el servidor.';
-      return res.status(status).json({ error: message });
+      return res.status(200).json({
+        transcribedText: '',
+        detectedLanguage: fromLang,
+        translatedText: '',
+        phonetic: '',
+        noSpeech: true,
+      });
     }
 
     const rawText = response.text ? response.text : '{}';

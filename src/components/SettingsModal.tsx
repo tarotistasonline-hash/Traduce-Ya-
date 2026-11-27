@@ -38,7 +38,7 @@ import {
   Fingerprint,
 } from 'lucide-react';
 import { TranslatorSettings } from '../types/translator';
-import { PWAInstallButton } from './PWAInstallButton';
+
 import {
   FREE_TRIAL_LIMIT,
   getUserApiKey,
@@ -986,8 +986,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           )}
 
-          {/* PWA Install Option */}
-          <PWAInstallButton variant="settings" />
+          {/* Browser Translation Notice */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50 space-y-1">
+            <div className="text-xs font-semibold text-cyan-300">Modo Navegador Directo</div>
+            <div className="text-[11px] text-slate-400">
+              La app está diseñada para usarse directamente en el navegador sin instalaciones. Cuenta con protección <code className="text-cyan-200">notranslate</code> integrada para evitar interferencias del traductor automático del navegador.
+            </div>
+          </div>
 
           {/* Auto Speak Toggle */}
           <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/50">

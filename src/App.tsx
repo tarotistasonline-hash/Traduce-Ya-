@@ -57,7 +57,6 @@ import { QuickPhrasesModal } from './components/QuickPhrasesModal';
 import { SettingsModal } from './components/SettingsModal';
 import { FullScreenModal } from './components/FullScreenModal';
 import { AudioWaveform } from './components/AudioWaveform';
-import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InstructionsModal } from './components/InstructionsModal';
 import { TextInputModal } from './components/TextInputModal';
@@ -854,8 +853,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* Always-Visible Install + Ajustes Buttons */}
-            <PWAInstallButton variant="header" />
+
 
             <button
               onClick={() => setIsSettingsOpen(true)}

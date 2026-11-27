@@ -311,7 +311,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             {isTranslating ? (
               <div className="flex items-center gap-2 text-cyan-300 text-sm py-1">
                 <Sparkles className="w-4 h-4 animate-spin" />
-                <span>Traduciendo al instante...</span>
+                <span>Traduciendo con IA...</span>
               </div>
             ) : (
               <p className="text-slate-200 italic font-medium text-base">
