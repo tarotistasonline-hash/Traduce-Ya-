@@ -856,6 +856,15 @@ export default function App() {
 
 
             <button
+              onClick={() => setIsTextInputOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 text-xs font-bold transition shadow-sm active:scale-95"
+              title="Escribir texto para traducir"
+            >
+              <Keyboard className="w-4 h-4 text-cyan-300" />
+              <span>Escribir</span>
+            </button>
+
+            <button
               onClick={() => setIsSettingsOpen(true)}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-500/40 text-slate-100 text-xs font-bold transition shadow-sm active:scale-95"
               title="Abrir menú de Ajustes y Diagnóstico de Micrófono"
