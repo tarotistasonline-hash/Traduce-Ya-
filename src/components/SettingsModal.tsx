@@ -520,6 +520,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <p className="text-xs text-slate-300 leading-relaxed">
               Si tienes tu propia clave gratuita de Google AI Studio, ingrésala aquí para tener <strong>traducciones ilimitadas con tu propia cuota</strong> sin agotar la clave pública de la app.
             </p>
+            <div className="p-2.5 rounded-xl bg-slate-950/75 border border-indigo-500/25 text-[11px] text-slate-300 space-y-1.5 leading-relaxed">
+              <p className="font-semibold text-indigo-200">¿Dónde encontrar tu clave gratis en 30 segundos?</p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                <li>
+                  Abre{' '}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-300 hover:text-indigo-200 underline font-semibold inline-flex items-center gap-0.5"
+                  >
+                    Google AI Studio (aistudio.google.com/apikey)
+                    <ExternalLink className="w-3 h-3" />
+                  </a>{' '}
+                  e inicia sesión con tu cuenta de Google.
+                </li>
+                <li>Toca el botón azul <strong>&quot;Create API key&quot;</strong> (Crear clave de API).</li>
+                <li>Copia el código que empieza con <code className="text-indigo-200">AIza...</code>, pégalo abajo y toca <strong>Guardar</strong>.</li>
+              </ol>
+            </div>
             <div className="space-y-2">
               <input
                 type="password"

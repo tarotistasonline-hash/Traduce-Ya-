@@ -73,7 +73,10 @@ export function useSpeechRecognition({
   const animationFrameRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<any>(null);
   const vadSilenceTimerRef = useRef<any>(null);
+  const cleanupFallbackTimerRef = useRef<any>(null);
   const hasSpokenAudioRef = useRef(false);
+  const listeningStartedAtRef = useRef(0);
+  const isStoppingRef = useRef(false);
 
   // Transcript tracking
   const accumulatedTextRef = useRef('');
@@ -106,6 +109,10 @@ export function useSpeechRecognition({
   }, []);
 
   const cleanupAudioStream = useCallback(() => {
+    if (cleanupFallbackTimerRef.current) {
+      clearTimeout(cleanupFallbackTimerRef.current);
+      cleanupFallbackTimerRef.current = null;
+    }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -137,7 +144,25 @@ export function useSpeechRecognition({
     setAudioLevel(0);
   }, []);
 
-  // Dispatch final transcript or audio blob
+  const stopRecorderSafely = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') {
+      return false;
+    }
+    try {
+      if (recorder.state === 'recording' && typeof recorder.requestData === 'function') {
+        recorder.requestData();
+      }
+    } catch {}
+    try {
+      recorder.stop();
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Dispatch final transcript or flush recorded audio blob
   const finishUtterance = useCallback(() => {
     if (hasDispatchedRef.current) return;
 
@@ -148,18 +173,14 @@ export function useSpeechRecognition({
       return;
     }
 
-    // If SpeechRecognition didn't produce text, flush recorded audio
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-  }, []);
+    stopRecorderSafely();
+  }, [stopRecorderSafely]);
 
   const stopListening = useCallback(() => {
-    clearSilenceTimer();
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
 
-    // Trigger completion if not already dispatched
+    clearSilenceTimer();
     finishUtterance();
 
     if (recognitionRef.current) {
@@ -168,29 +189,29 @@ export function useSpeechRecognition({
       } catch (e) {
         console.warn('Error stopping recognition:', e);
       }
+      recognitionRef.current = null;
     }
 
-    const hasActiveRecorder =
-      mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive';
-
-    if (hasActiveRecorder) {
-      try {
-        mediaRecorderRef.current!.stop();
-      } catch {}
-      // Give MediaRecorder enough time on mobile to emit final dataavailable/onstop before tearing down streams
-      setTimeout(() => {
+    const recorderStopping = stopRecorderSafely();
+    if (recorderStopping) {
+      // Wait for recorder.onstop to flush final audio chunks before stopping hardware tracks
+      if (cleanupFallbackTimerRef.current) {
+        clearTimeout(cleanupFallbackTimerRef.current);
+      }
+      cleanupFallbackTimerRef.current = setTimeout(() => {
         cleanupAudioStream();
-      }, 260);
+      }, 900);
     } else {
       cleanupAudioStream();
     }
 
     setIsListening(false);
     setInterimText('');
-  }, [clearSilenceTimer, cleanupAudioStream, finishUtterance]);
+  }, [clearSilenceTimer, cleanupAudioStream, finishUtterance, stopRecorderSafely]);
 
   const startListening = useCallback(async (overrideLang?: string) => {
     // Synchronously reset state
+    isStoppingRef.current = false;
     clearSilenceTimer();
     cleanupAudioStream();
 
@@ -199,6 +220,7 @@ export function useSpeechRecognition({
     hasDispatchedRef.current = false;
     hasSpeechApiResultsRef.current = false;
     hasSpokenAudioRef.current = false;
+    listeningStartedAtRef.current = Date.now();
     audioChunksRef.current = [];
     setInterimText('');
 
@@ -210,14 +232,13 @@ export function useSpeechRecognition({
         throw new Error('El micrófono no está disponible en este navegador o visor.');
       }
 
-      // 1. Acquire microphone stream with advanced acoustic noise suppression
+      // 1. Acquire microphone stream with acoustic noise suppression
       const audioConstraints: MediaTrackConstraints = noiseFilter
         ? {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
             channelCount: 1,
-            // Advanced acoustic noise suppression hints for Chromium / WebKit
             ...({
               googEchoCancellation: true,
               googAutoGainControl: true,
@@ -236,9 +257,9 @@ export function useSpeechRecognition({
       });
       mediaStreamRef.current = stream;
 
-      let recordStream: MediaStream = stream;
+      const recordStream: MediaStream = stream;
 
-      // 2. Setup Audio Visualizer & DSP Voice Isolation Chain using reused or fresh AudioContext
+      // 2. Setup Audio Visualizer & Time-Domain RMS Voice Activity Detection
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) {
@@ -252,27 +273,24 @@ export function useSpeechRecognition({
           }
 
           const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 256;
-          analyser.smoothingTimeConstant = 0.5;
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.35;
           analyserRef.current = analyser;
 
           const source = audioCtx.createMediaStreamSource(stream);
           sourceNodeRef.current = source;
 
           if (noiseFilter) {
-            // High-pass filter (85Hz): eliminates low-frequency table thumps, engine rumble, AC vibrations
             const hpFilter = audioCtx.createBiquadFilter();
             hpFilter.type = 'highpass';
             hpFilter.frequency.value = 85;
             hpFilter.Q.value = 0.7;
 
-            // Low-pass filter (7500Hz): cuts off high-frequency cutlery clatter, glass clinks, hiss
             const lpFilter = audioCtx.createBiquadFilter();
             lpFilter.type = 'lowpass';
             lpFilter.frequency.value = 7500;
             lpFilter.Q.value = 0.7;
 
-            // Voice presence peaking filter (2500Hz): clarifies human vocal tract frequencies
             const voiceFilter = audioCtx.createBiquadFilter();
             voiceFilter.type = 'peaking';
             voiceFilter.frequency.value = 2500;
@@ -281,7 +299,6 @@ export function useSpeechRecognition({
 
             filterNodesRef.current = [hpFilter, lpFilter, voiceFilter];
 
-            // Chain: source -> HP -> Voice Peaking -> LP -> Analyser
             source.connect(hpFilter);
             hpFilter.connect(voiceFilter);
             voiceFilter.connect(lpFilter);
@@ -291,43 +308,39 @@ export function useSpeechRecognition({
             source.connect(analyser);
           }
 
-          // Always record from direct hardware mic stream (with native WebRTC echo & noise suppression)
-          // to ensure 100% compatibility across iOS Safari, Chrome Mobile, and Android WebViews
-          recordStream = stream;
-
-          const bufferLength = analyser.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
+          const timeData = new Uint8Array(analyser.fftSize);
 
           const updateLevel = () => {
             if (!analyserRef.current) return;
-            analyserRef.current.getByteFrequencyData(dataArray);
+            analyserRef.current.getByteTimeDomainData(timeData);
 
-            let sum = 0;
-            for (let i = 0; i < bufferLength; i++) {
-              sum += dataArray[i];
+            let sumSq = 0;
+            for (let i = 0; i < timeData.length; i++) {
+              const norm = (timeData[i] - 128) / 128;
+              sumSq += norm * norm;
             }
-            const average = sum / bufferLength;
-            const level = Math.min(100, Math.round((average / 128) * 100 * 1.5));
+            const rms = Math.sqrt(sumSq / timeData.length);
+            const level = Math.min(100, Math.round(rms * 420));
             setAudioLevel(level);
 
-            // Noise-gated voice activity detection:
-            const speechThreshold = noiseFilter ? 10 : 7;
-            const silenceFloor = noiseFilter ? 7 : 5;
+            const elapsedMs = Date.now() - listeningStartedAtRef.current;
+            const speechThreshold = 8;
+            const silenceFloor = 4;
 
-            if (level > speechThreshold) {
+            if (level >= speechThreshold) {
               hasSpokenAudioRef.current = true;
               if (vadSilenceTimerRef.current) {
                 clearTimeout(vadSilenceTimerRef.current);
                 vadSilenceTimerRef.current = null;
               }
-            } else if (hasSpokenAudioRef.current && level < silenceFloor) {
+            } else if (hasSpokenAudioRef.current && elapsedMs > 1200 && level < silenceFloor) {
               if (!vadSilenceTimerRef.current && !hasSpeechApiResultsRef.current) {
                 vadSilenceTimerRef.current = setTimeout(() => {
-                  if (!hasDispatchedRef.current) {
+                  if (!hasDispatchedRef.current && !isStoppingRef.current) {
                     stopListening();
                     onEndRef.current?.();
                   }
-                }, 1150);
+                }, 1400);
               }
             }
 
@@ -339,9 +352,9 @@ export function useSpeechRecognition({
         console.warn('Audio level analyser init:', e);
       }
 
-      // 3. Setup MediaRecorder for direct multimodal audio fallback using isolated voice stream
+      // 3. Setup MediaRecorder for reliable multimodal audio capture
       try {
-        let mimeType = 'audio/webm';
+        let mimeType = '';
         if (typeof MediaRecorder !== 'undefined') {
           if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
             mimeType = 'audio/webm;codecs=opus';
@@ -349,11 +362,15 @@ export function useSpeechRecognition({
             mimeType = 'audio/webm';
           } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
             mimeType = 'audio/mp4';
+          } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+            mimeType = 'audio/ogg;codecs=opus';
           } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
             mimeType = 'audio/ogg';
           }
 
           const recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : undefined);
+          const resolvedMime = recorder.mimeType || mimeType || 'audio/webm';
+
           recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) {
               audioChunksRef.current.push(e.data);
@@ -361,23 +378,12 @@ export function useSpeechRecognition({
           };
 
           recorder.onstop = () => {
-            const trackActive = isAudioTrackActive(mediaStreamRef.current);
-            console.log('[useSpeechRecognition] recorder onstop fired:', {
-              chunksCount: audioChunksRef.current.length,
-              hasDispatched: hasDispatchedRef.current,
-              trackActive,
-            });
-
-            if (!hasDispatchedRef.current && audioChunksRef.current.length > 0) {
-              const audioBlob = new Blob(audioChunksRef.current, {
-                type: mimeType || 'audio/webm',
-              });
-              console.log('[useSpeechRecognition] Generated audioBlob:', {
-                size: audioBlob.size,
-                type: audioBlob.type,
-                trackActive,
-              });
-
+            if (mediaRecorderRef.current === recorder) {
+              mediaRecorderRef.current = null;
+            }
+            const chunks = audioChunksRef.current.slice();
+            if (!hasDispatchedRef.current && chunks.length > 0) {
+              const audioBlob = new Blob(chunks, { type: resolvedMime });
               if (audioBlob.size > 250) {
                 hasDispatchedRef.current = true;
                 onAudioRecordedRef.current?.(audioBlob);
@@ -385,10 +391,11 @@ export function useSpeechRecognition({
                 console.warn('[useSpeechRecognition] Audio blob too small (<250 bytes), skipped dispatch.');
               }
             }
+            cleanupAudioStream();
           };
 
           mediaRecorderRef.current = recorder;
-          recorder.start(150); // collect in chunks
+          recorder.start(400);
         }
       } catch (err) {
         console.warn('MediaRecorder init:', err);
@@ -450,25 +457,20 @@ export function useSpeechRecognition({
         };
 
         recognition.onerror = (event: any) => {
-          console.warn('SpeechRecognition error (will fallback to audio recording):', event.error);
+          console.warn('SpeechRecognition error (MediaRecorder audio remains active):', event.error);
         };
 
         recognition.onend = () => {
-          // If SpeechRecognition ended without producing text (e.g. mobile network/no-speech hiccup)
-          // while MediaRecorder is actively capturing audio, keep MediaRecorder + VAD running!
           const recorderActive =
             mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording';
-          if (!hasSpeechApiResultsRef.current && recorderActive && !hasDispatchedRef.current) {
+          if (!hasSpeechApiResultsRef.current && recorderActive && !hasDispatchedRef.current && !isStoppingRef.current) {
             return;
           }
 
-          if (!hasDispatchedRef.current) {
+          if (!hasDispatchedRef.current && !isStoppingRef.current) {
             stopListening();
             onEndRef.current?.();
           } else {
-            setTimeout(() => {
-              cleanupAudioStream();
-            }, 350);
             setIsListening(false);
             onEndRef.current?.();
           }

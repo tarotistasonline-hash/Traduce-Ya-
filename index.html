@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="google" content="notranslate" />
+    <meta name="googlebot" content="notranslate" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Traductor Ya - Traductor de Voz y Conversación</title>
     <meta name="description" content="Traductor simultáneo por voz y audio para conversaciones cara a cara y manos libres en cualquier idioma." />
@@ -22,7 +23,117 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      .goog-te-banner-frame,
+      .goog-te-balloon-frame,
+      #goog-gt-tt,
+      .goog-tooltip,
+      .skiptranslate {
+        display: none !important;
+        visibility: hidden !important;
+      }
+      body {
+        top: 0 !important;
+      }
+    </style>
     <script>
+      // Auto-neutralize active browser translators (Chrome / Edge / extensions) & prevent React DOM crashes
+      (function() {
+        if (typeof Node === 'function' && Node.prototype) {
+          var originalRemoveChild = Node.prototype.removeChild;
+          Node.prototype.removeChild = function(child) {
+            if (child && child.parentNode !== this) {
+              return child;
+            }
+            return originalRemoveChild.apply(this, arguments);
+          };
+
+          var originalInsertBefore = Node.prototype.insertBefore;
+          Node.prototype.insertBefore = function(newNode, referenceNode) {
+            if (referenceNode && referenceNode.parentNode !== this) {
+              if (referenceNode instanceof Element) {
+                return originalInsertBefore.call(this, newNode, null);
+              }
+              return newNode;
+            }
+            return originalInsertBefore.apply(this, arguments);
+          };
+        }
+
+        function enforceNoTranslate() {
+          try {
+            var html = document.documentElement;
+            var detected = false;
+            if (html) {
+              if (html.classList.contains('translated-ltr') || html.classList.contains('translated-rtl')) {
+                html.classList.remove('translated-ltr', 'translated-rtl');
+                detected = true;
+              }
+              if (html.getAttribute('translate') !== 'no') {
+                html.setAttribute('translate', 'no');
+              }
+              if (!html.classList.contains('notranslate')) {
+                html.classList.add('notranslate');
+              }
+              if (html.getAttribute('lang') !== 'es') {
+                html.setAttribute('lang', 'es');
+              }
+            }
+            if (document.body) {
+              if (document.body.getAttribute('translate') !== 'no') {
+                document.body.setAttribute('translate', 'no');
+              }
+              if (!document.body.classList.contains('notranslate')) {
+                document.body.classList.add('notranslate');
+              }
+            }
+            var rootEl = document.getElementById('root');
+            if (rootEl) {
+              if (rootEl.getAttribute('translate') !== 'no') {
+                rootEl.setAttribute('translate', 'no');
+              }
+              if (!rootEl.classList.contains('notranslate')) {
+                rootEl.classList.add('notranslate');
+              }
+            }
+            if (detected) {
+              window.__browserTranslateDetected = true;
+              window.dispatchEvent(new CustomEvent('traductorya:browser-translate-detected'));
+            }
+          } catch (e) {}
+        }
+
+        enforceNoTranslate();
+
+        if (typeof MutationObserver === 'function' && document.documentElement) {
+          var observer = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+              var m = mutations[i];
+              if (m.type === 'attributes' && m.target === document.documentElement) {
+                enforceNoTranslate();
+                break;
+              }
+              if (m.type === 'childList' && m.addedNodes && m.addedNodes.length) {
+                for (var j = 0; j < m.addedNodes.length; j++) {
+                  var node = m.addedNodes[j];
+                  if (node && node.nodeName === 'FONT' && node.parentNode) {
+                    window.__browserTranslateDetected = true;
+                    window.dispatchEvent(new CustomEvent('traductorya:browser-translate-detected'));
+                    break;
+                  }
+                }
+              }
+            }
+          });
+          observer.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class', 'translate', 'lang'],
+            childList: true,
+            subtree: true
+          });
+        }
+      })();
+
       // Gracefully prevent benign preview errors (WebSocket, mic permission in iframe, SpeechRecognition) from bubbling to AI Studio error harness
       (function() {
         var origError = console.error;

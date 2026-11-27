@@ -139,6 +139,25 @@ export default function App() {
   });
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [iframeBannerDismissed, setIframeBannerDismissed] = useState(false);
+  const [browserTranslatorDetected, setBrowserTranslatorDetected] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(
+      (window as any).__browserTranslateDetected ||
+        document.documentElement?.classList.contains('translated-ltr') ||
+        document.documentElement?.classList.contains('translated-rtl')
+    );
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onTranslateDetected = () => {
+      setBrowserTranslatorDetected(true);
+    };
+    window.addEventListener('traductorya:browser-translate-detected', onTranslateDetected);
+    return () => {
+      window.removeEventListener('traductorya:browser-translate-detected', onTranslateDetected);
+    };
+  }, []);
   const isInIframe = (() => {
     try {
       return typeof window !== 'undefined' && window.self !== window.top;
@@ -1030,6 +1049,32 @@ export default function App() {
 
       {/* Offline Status Indicator */}
       <OfflineIndicator />
+
+      {/* Active Browser Translator Auto-Protection Banner */}
+      {browserTranslatorDetected && (
+        <div className="bg-amber-950/95 border-b border-amber-500/50 px-3 py-2 text-xs text-amber-100 flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            <span className="text-[11px] leading-snug">
+              <strong>Traductor del navegador detectado:</strong> lo neutralizamos automáticamente para proteger tus traducciones. Si ves el ícono de traducir en la barra, toca <strong>&quot;No traducir nunca este sitio&quot;</strong>.
+            </span>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-2.5 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-[11px] shrink-0 transition"
+            >
+              Recargar limpio
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBrowserTranslatorDetected(false)}
+            className="text-[10px] text-amber-300 hover:text-white px-1 py-0.5 shrink-0"
+            title="Cerrar aviso"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Embedded Preview Iframe Notice for Mobile Mic Access */}
       {isInIframe && !iframeBannerDismissed && (
