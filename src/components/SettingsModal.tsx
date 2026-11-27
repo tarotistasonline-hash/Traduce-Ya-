@@ -518,27 +518,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Si tienes tu propia clave gratuita de Google AI Studio, ingrésala aquí para tener <strong>traducciones ilimitadas con tu propia cuota</strong> sin agotar la clave pública de la app.
+              Una <strong>API Key</strong> es una clave personal y gratuita que te da Google para usar el motor de traducción de forma <strong>ilimitada</strong> sin depender del límite compartido.
             </p>
-            <div className="p-2.5 rounded-xl bg-slate-950/75 border border-indigo-500/25 text-[11px] text-slate-300 space-y-1.5 leading-relaxed">
-              <p className="font-semibold text-indigo-200">¿Dónde encontrar tu clave gratis en 30 segundos?</p>
+            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-indigo-500/30 text-[11px] text-slate-300 space-y-2 leading-relaxed">
+              <p className="font-bold text-indigo-200">Cómo conseguirla gratis en 30 segundos (paso a paso):</p>
               <ol className="list-decimal list-inside space-y-1 text-slate-300">
-                <li>
-                  Abre{' '}
-                  <a
-                    href="https://aistudio.google.com/apikey"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-300 hover:text-indigo-200 underline font-semibold inline-flex items-center gap-0.5"
-                  >
-                    Google AI Studio (aistudio.google.com/apikey)
-                    <ExternalLink className="w-3 h-3" />
-                  </a>{' '}
-                  e inicia sesión con tu cuenta de Google.
-                </li>
-                <li>Toca el botón azul <strong>&quot;Create API key&quot;</strong> (Crear clave de API).</li>
-                <li>Copia el código que empieza con <code className="text-indigo-200">AIza...</code>, pégalo abajo y toca <strong>Guardar</strong>.</li>
+                <li>Toca el botón de abajo para abrir <strong>Google AI Studio</strong> e inicia sesión con tu cuenta de Gmail/Google.</li>
+                <li>Toca <strong>&quot;Create API key&quot;</strong> (si te pide elegir proyecto, toca crear uno nuevo o elige el que aparece).</li>
+                <li>Copia el código largo que empieza con <code className="text-indigo-200">AIza...</code>, vuelve aquí, pégalo abajo y toca <strong>Guardar</strong>.</li>
               </ol>
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2 px-3 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold text-xs flex items-center justify-center gap-1.5 transition"
+              >
+                <span>Ir a buscar mi clave gratis en Google AI Studio</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             </div>
             <div className="space-y-2">
               <input
