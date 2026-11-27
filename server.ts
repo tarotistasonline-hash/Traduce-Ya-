@@ -38,7 +38,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.disable('x-powered-by');
 app.use(securityHeadersMiddleware);
@@ -509,15 +509,25 @@ function getSmartFallbackTranslation(
   };
 
   const targetLower = toLang.toLowerCase();
+  const normalizedTarget = targetLower.includes('ingl') || targetLower.includes('english')
+    ? 'english'
+    : targetLower.includes('portug')
+    ? 'portuguese'
+    : targetLower.includes('fran')
+    ? 'french'
+    : targetLower.includes('ital')
+    ? 'italian'
+    : targetLower.includes('alem') || targetLower.includes('german')
+    ? 'german'
+    : targetLower;
+
   let translatedText = clean;
 
   for (const [key, map] of Object.entries(greetings)) {
     if (lower.includes(key)) {
-      for (const [langName, translation] of Object.entries(map)) {
-        if (targetLower.includes(langName)) {
-          translatedText = clean.replace(new RegExp(key, 'gi'), translation);
-          break;
-        }
+      const replacement = map[normalizedTarget];
+      if (replacement) {
+        translatedText = clean.replace(new RegExp(key, 'gi'), replacement);
       }
     }
   }
@@ -1144,9 +1154,14 @@ Return ONLY compact JSON:
       translatedText: data.translatedText || data.transcribedText || 'Audio recibido',
       phonetic: data.phonetic || '',
     });
-  } catch {
-    return res.status(500).json({
-      error: 'Error interno al procesar el audio.',
+  } catch (err: any) {
+    console.error('Audio translation unexpected error:', err?.message || err);
+    return res.status(200).json({
+      transcribedText: '',
+      detectedLanguage: typeof req.body?.fromLang === 'string' ? req.body.fromLang : 'Auto-detect',
+      translatedText: '',
+      phonetic: '',
+      noSpeech: true,
     });
   }
 });
@@ -1208,6 +1223,18 @@ app.post('/api/tts', async (req, res) => {
   } catch {
     return res.json({ audioBase64: null });
   }
+});
+
+// Ensure /api routes never emit Express default HTML 500 pages
+app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('API middleware error:', err?.message || err);
+  const status = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+  return res.status(status).json({
+    error:
+      status === 413
+        ? 'El audio es demasiado largo. Intenta una frase más corta.'
+        : 'No se pudo procesar la solicitud en este momento. Intenta nuevamente.',
+  });
 });
 
 async function startServer() {

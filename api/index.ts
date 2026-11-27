@@ -96,7 +96,10 @@ function resolveAiClient(req: express.Request):
   if (validated.key) {
     return {
       ok: true,
-      ai: new GoogleGenAI({ apiKey: validated.key }),
+      ai: new GoogleGenAI({
+        apiKey: validated.key,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      }),
       usingCustomKey: true,
     };
   }
@@ -108,7 +111,10 @@ function resolveAiClient(req: express.Request):
 
   if (!aiClient || cachedApiKey !== currentKey) {
     cachedApiKey = currentKey;
-    aiClient = new GoogleGenAI({ apiKey: currentKey });
+    aiClient = new GoogleGenAI({
+      apiKey: currentKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
   }
   return { ok: true, ai: aiClient, usingCustomKey: false };
 }
@@ -471,15 +477,25 @@ function getSmartFallbackTranslation(
   };
 
   const targetLower = toLang.toLowerCase();
+  const normalizedTarget = targetLower.includes('ingl') || targetLower.includes('english')
+    ? 'english'
+    : targetLower.includes('portug')
+    ? 'portuguese'
+    : targetLower.includes('fran')
+    ? 'french'
+    : targetLower.includes('ital')
+    ? 'italian'
+    : targetLower.includes('alem') || targetLower.includes('german')
+    ? 'german'
+    : targetLower;
+
   let translatedText = clean;
 
   for (const [key, map] of Object.entries(greetings)) {
     if (lower.includes(key)) {
-      for (const [langName, translation] of Object.entries(map)) {
-        if (targetLower.includes(langName)) {
-          translatedText = clean.replace(new RegExp(key, 'gi'), translation);
-          break;
-        }
+      const replacement = map[normalizedTarget];
+      if (replacement) {
+        translatedText = clean.replace(new RegExp(key, 'gi'), replacement);
       }
     }
   }
@@ -750,9 +766,14 @@ Return ONLY compact JSON:
       translatedText: data.translatedText || data.transcribedText || 'Audio recibido',
       phonetic: data.phonetic || '',
     });
-  } catch {
-    return res.status(500).json({
-      error: 'Error interno al procesar el audio.',
+  } catch (err: any) {
+    console.error('Audio translation unexpected error:', err?.message || err);
+    return res.status(200).json({
+      transcribedText: '',
+      detectedLanguage: fromLang,
+      translatedText: '',
+      phonetic: '',
+      noSpeech: true,
     });
   }
 });
@@ -937,6 +958,17 @@ app.use('/api/visits', (req, res, next) => {
 
 app.use('/api', (req, res) => {
   return proxyToFallbackOrigin(req, res);
+});
+
+app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('API middleware error:', err?.message || err);
+  const status = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+  return res.status(status).json({
+    error:
+      status === 413
+        ? 'El audio es demasiado largo. Intenta una frase más corta.'
+        : 'No se pudo procesar la solicitud en este momento. Intenta nuevamente.',
+  });
 });
 
 export default app;
