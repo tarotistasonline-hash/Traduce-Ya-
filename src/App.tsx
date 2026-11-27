@@ -69,6 +69,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   isProUser,
   isAdminAuthenticated,
+  clearAdminSession,
   getFreeTrialUsage,
   incrementFreeTrialUsage,
   getRemainingTranslations,
@@ -189,6 +190,36 @@ export default function App() {
       active = false;
     };
   }, [syncLicenseState]);
+
+  // Admin inactivity timeout (5 minutes of inactivity)
+  useEffect(() => {
+    if (!isAdmin) return;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (isAdminAuthenticated()) {
+          clearAdminSession();
+          syncLicenseState();
+          setStatusAlert({
+            message: '🔒 Sesión de administrador cerrada automáticamente por inactividad (5 minutos).',
+            type: 'info',
+          });
+          setTimeout(() => setStatusAlert(null), 6000);
+        }
+      }, 5 * 60 * 1000); // 5 minutes
+    };
+
+    const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    activityEvents.forEach((ev) => window.addEventListener(ev, resetTimer));
+    resetTimer();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      activityEvents.forEach((ev) => window.removeEventListener(ev, resetTimer));
+    };
+  }, [isAdmin, syncLicenseState]);
 
   // Visitor stats state (visitas reales con auto-recuperación)
   const [visitorStats, setVisitorStats] = useState<VisitorStats>(() => getCachedVisitorStats());
@@ -486,7 +517,17 @@ export default function App() {
           message: err?.message || 'No se pudo completar la traducción en este momento.',
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 7000);
+        setTimeout(() => setStatusAlert(null), 5000);
+
+        // Auto-recover continuous hands-free mode so conversation doesn't stop on transient hiccups
+        if (isContinuousRef.current && activeSpeakerRef.current === null) {
+          clearContinuousHandoff();
+          continuousTimerRef.current = setTimeout(() => {
+            if (isContinuousRef.current && activeSpeakerRef.current === null) {
+              handleStartListeningRef.current(speaker);
+            }
+          }, 1800);
+        }
       } finally {
         setIsTranslating(false);
         setTranslatingSpeaker(null);
@@ -641,13 +682,23 @@ export default function App() {
           rawMsg.includes('conectar con el servidor') ||
           rawMsg.includes('interrumpió la conexión');
         const errorText = isFetchIssue
-          ? 'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o reintenta.'
-          : rawMsg || 'Error al traducir el audio. Intenta nuevamente o verifica tu micrófono.';
+          ? 'No se pudo conectar con el servidor de traducción. Reintentando...'
+          : rawMsg || 'Error al traducir el audio. Reintentando...';
         setStatusAlert({
           message: errorText,
           type: 'error',
         });
-        setTimeout(() => setStatusAlert(null), 7000);
+        setTimeout(() => setStatusAlert(null), 5000);
+
+        // Auto-recover continuous hands-free mode so conversation doesn't stop
+        if (isContinuousRef.current && activeSpeakerRef.current === null) {
+          clearContinuousHandoff();
+          continuousTimerRef.current = setTimeout(() => {
+            if (isContinuousRef.current && activeSpeakerRef.current === null) {
+              handleStartListeningRef.current(speaker);
+            }
+          }, 1800);
+        }
       } finally {
         setIsTranslating(false);
         setTranslatingSpeaker(null);

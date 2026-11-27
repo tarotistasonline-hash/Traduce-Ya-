@@ -1,5 +1,6 @@
 import express from 'express';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import type { StoredWebAuthnCredential } from './_security';
 import {
   checkRateLimit,
   constantTimeEqual,
@@ -18,7 +19,6 @@ import {
   securityHeadersMiddleware,
   signBiometricBundle,
   signSessionToken,
-  StoredWebAuthnCredential,
   validateAudioPayload,
   validateCustomGeminiKey,
   validateTranslateBody,
@@ -465,7 +465,7 @@ Return ONLY compact JSON:
           contents: prompt,
           config: { responseMimeType: 'application/json', temperature: 0.2 },
         }),
-        3800,
+        8500,
         'gemini-3.1-flash-lite translate'
       );
     } catch (primaryErr: any) {
@@ -480,22 +480,22 @@ Return ONLY compact JSON:
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          4600,
+          8000,
           'gemini-4-hydrogen translate'
         );
       } catch (fallbackErr: any) {
         if (
           (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) &&
-          Date.now() - startedAt < 5200
+          Date.now() - startedAt < 9000
         ) {
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, 300));
           response = await withTimeout(
             ai.models.generateContent({
               model: 'gemini-3.1-flash-lite',
               contents: prompt,
               config: { responseMimeType: 'application/json', temperature: 0.2 },
             }),
-            3500,
+            7000,
             'gemini-3.1-flash-lite retry'
           );
         } else {
@@ -583,31 +583,42 @@ Return ONLY compact JSON:
     let response: any = null;
     let lastError: any = null;
 
+    // 1. Primary: Direct multimodal translation with gemini-4-hydrogen
     try {
       response = await withTimeout(
         ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: { parts: [audioPart, { text: promptText }] },
-          config: { responseMimeType: 'application/json', temperature: 0.2 },
+          model: 'gemini-4-hydrogen',
+          contents: {
+            parts: [audioPart, { text: promptText }],
+          },
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
         }),
-        4500,
-        'gemini-3.1-flash-lite audio'
+        9500,
+        'gemini-4-hydrogen audio'
       );
     } catch (primaryErr: any) {
       lastError = primaryErr;
+      console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe fallback)');
+
+      // 2. Fallback: Audio transcription with gemini-3.5-transcribe
       try {
         response = await withTimeout(
           ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: { parts: [audioPart, { text: promptText }] },
+            model: 'gemini-3.5-transcribe',
+            contents: {
+              parts: [audioPart, { text: promptText }],
+            },
             config: {
               responseMimeType: 'application/json',
               temperature: 0.2,
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          4800,
-          'gemini-4-hydrogen audio'
+          9000,
+          'gemini-3.5-transcribe audio'
         );
       } catch (fallbackErr: any) {
         lastError = fallbackErr;

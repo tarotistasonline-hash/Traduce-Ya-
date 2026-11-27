@@ -62,22 +62,58 @@ async function fetchWithTimeout(
   }
 }
 
-async function parseJsonSafely(res: Response): Promise<any> {
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    throw new Error(
-      'El servidor de traducción devolvió una respuesta no válida (verifica si la sesión expiró o si el dominio tiene acceso al backend /api).'
-    );
-  }
+async function parseResponseSafely(res: Response): Promise<any> {
+  let rawText = '';
   try {
-    return await res.json();
-  } catch (err: any) {
-    if (isNetworkFetchError(err)) {
+    rawText = await res.text();
+  } catch (readErr: any) {
+    if (isNetworkFetchError(readErr)) {
+      throw new Error('Se interrumpió la conexión al recibir la respuesta. Intenta de nuevo.');
+    }
+    throw new Error('No se pudo leer la respuesta del servidor.');
+  }
+
+  // If response has HTTP error status (4xx / 5xx)
+  if (!res.ok) {
+    let parsedError: string | null = null;
+    try {
+      const errObj = JSON.parse(rawText);
+      if (typeof errObj?.error === 'string' && errObj.error.trim()) {
+        parsedError = errObj.error.trim();
+      }
+    } catch {}
+
+    if (parsedError) {
+      throw new Error(parsedError);
+    }
+    if (res.status === 429) {
       throw new Error(
-        'Se interrumpió la conexión al leer la respuesta del servidor. Intenta nuevamente.'
+        'Se alcanzó temporalmente el límite de solicitudes de traducción. Espera unos segundos e inténtalo de nuevo.'
       );
     }
-    throw new Error('La respuesta del servidor de traducción no pudo leerse correctamente.');
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error(
+        'El motor de traducción está con alta demanda temporal. Intenta de nuevo en unos segundos.'
+      );
+    }
+    if (res.status === 404) {
+      throw new Error('El servicio de traducción no está disponible en esta ruta. Recarga la página.');
+    }
+    throw new Error(`Error ${res.status} al procesar la traducción. Intenta nuevamente.`);
+  }
+
+  // Response is OK (200)
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    const clean = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {}
+    }
+    throw new Error('La respuesta del servidor no tiene el formato esperado. Por favor reintenta.');
   }
 }
 
@@ -89,6 +125,7 @@ export async function translateText(
 ): Promise<TranslateResponse> {
   const url = getApiEndpoint('/api/translate');
   const requestBody = JSON.stringify({ text, fromLang, toLang, tone });
+  let lastError: any = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -99,35 +136,27 @@ export async function translateText(
           headers: getAuthHeaders(),
           body: requestBody,
         },
-        15000
+        18000
       );
 
-      const data = await parseJsonSafely(res);
-      if (!res.ok) {
-        throw new Error(data?.error || `Error ${res.status} del servidor.`);
-      }
-      return data;
+      return await parseResponseSafely(res);
     } catch (err: any) {
+      lastError = err;
       console.warn(`Translate attempt ${attempt + 1} notice:`, err);
       if (err?.name === 'AbortError') {
         throw new Error(
           'La traducción tardó demasiado en responder. Intenta nuevamente con una frase más corta.'
         );
       }
-      if (attempt === 0 && isNetworkFetchError(err)) {
-        await new Promise((r) => setTimeout(r, 350));
+      if (attempt === 0) {
+        // Automatic brief backoff retry on transient glitch
+        await new Promise((r) => setTimeout(r, 600));
         continue;
       }
-      if (isNetworkFetchError(err)) {
-        throw new Error(
-          'No se pudo conectar con el servidor de traducción. Verifica tu conexión de internet o recarga la página.'
-        );
-      }
-      throw err;
     }
   }
 
-  throw new Error('No se pudo conectar con el servidor de traducción.');
+  throw lastError || new Error('No se pudo conectar con el servidor de traducción.');
 }
 
 export async function translateAudioBlob(
@@ -179,54 +208,43 @@ export async function translateAudioBlob(
     toLang,
   });
 
-  let res: Response | null = null;
+  let lastError: any = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      res = await fetchWithTimeout(
+      const res = await fetchWithTimeout(
         url,
         {
           method: 'POST',
           headers: getAuthHeaders(),
           body: payload,
         },
-        20000
+        22000
       );
-      break;
+
+      const data = await parseResponseSafely(res);
+      return {
+        transcribedText: data.transcribedText || '',
+        detectedLanguage: data.detectedLanguage || fromLang,
+        translatedText: data.translatedText || '',
+        phonetic: data.phonetic || '',
+        noSpeech: Boolean(data.noSpeech),
+      };
     } catch (fetchErr: any) {
-      console.warn(`[translateAudioBlob] Fetch attempt ${attempt + 1} failed:`, fetchErr);
+      lastError = fetchErr;
+      console.warn(`[translateAudioBlob] Attempt ${attempt + 1} notice:`, fetchErr);
       if (fetchErr?.name === 'AbortError') {
         throw new Error(
           'El análisis de audio tardó demasiado en responder. Intenta hablar más cerca o una frase más breve.'
         );
       }
       if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, 600));
         continue;
       }
-      throw new Error(
-        'No se pudo conectar con el servidor de traducción. Verifica tu conexión de red o recarga la página.'
-      );
     }
   }
 
-  if (!res) {
-    throw new Error('No se recibió respuesta del servidor de traducción.');
-  }
-
-  const data = await parseJsonSafely(res);
-  if (!res.ok) {
-    const errorMsg = data?.error || `Error ${res.status} al procesar audio en servidor`;
-    console.warn('[translateAudioBlob] Server returned error notice:', { status: res.status, errorMsg });
-    throw new Error(errorMsg);
-  }
-
-  return {
-    transcribedText: data.transcribedText || '',
-    detectedLanguage: data.detectedLanguage || fromLang,
-    translatedText: data.translatedText || '',
-    phonetic: data.phonetic || '',
-    noSpeech: Boolean(data.noSpeech),
-  };
+  throw lastError || new Error('No se pudo conectar con el servidor de traducción.');
 }
 
 export async function generateAiSpeech(
@@ -246,7 +264,7 @@ export async function generateAiSpeech(
     );
 
     if (!res.ok) return null;
-    const data = await parseJsonSafely(res);
+    const data = await parseResponseSafely(res);
     return data.audioBase64 || null;
   } catch (err) {
     console.warn('TTS fetch failed:', err);

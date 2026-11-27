@@ -67,6 +67,8 @@ export function useSpeechRecognition({
   const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const filterNodesRef = useRef<BiquadFilterNode[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<any>(null);
@@ -83,6 +85,13 @@ export function useSpeechRecognition({
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     const hasMedia = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
     setIsSupported(!!(SpeechRec || hasMedia));
+
+    return () => {
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+    };
   }, []);
 
   const clearSilenceTimer = useCallback(() => {
@@ -101,14 +110,29 @@ export function useSpeechRecognition({
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    try {
+      sourceNodeRef.current?.disconnect();
+    } catch {}
+    sourceNodeRef.current = null;
+
+    filterNodesRef.current.forEach((n) => {
+      try {
+        n.disconnect();
+      } catch {}
+    });
+    filterNodesRef.current = [];
+
+    try {
+      analyserRef.current?.disconnect();
+    } catch {}
     analyserRef.current = null;
+
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
+    if (audioContextRef.current && audioContextRef.current.state === 'running') {
+      audioContextRef.current.suspend().catch(() => {});
     }
     setAudioLevel(0);
   }, []);
@@ -214,15 +238,18 @@ export function useSpeechRecognition({
 
       let recordStream: MediaStream = stream;
 
-      // 2. Setup Audio Visualizer & DSP Voice Isolation Chain
+      // 2. Setup Audio Visualizer & DSP Voice Isolation Chain using reused or fresh AudioContext
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) {
-          const audioCtx = new AudioCtx();
+          let audioCtx = audioContextRef.current;
+          if (!audioCtx || audioCtx.state === 'closed') {
+            audioCtx = new AudioCtx();
+            audioContextRef.current = audioCtx;
+          }
           if (audioCtx.state === 'suspended') {
             await audioCtx.resume().catch(() => {});
           }
-          audioContextRef.current = audioCtx;
 
           const analyser = audioCtx.createAnalyser();
           analyser.fftSize = 256;
@@ -230,6 +257,7 @@ export function useSpeechRecognition({
           analyserRef.current = analyser;
 
           const source = audioCtx.createMediaStreamSource(stream);
+          sourceNodeRef.current = source;
 
           if (noiseFilter) {
             // High-pass filter (85Hz): eliminates low-frequency table thumps, engine rumble, AC vibrations
@@ -251,12 +279,15 @@ export function useSpeechRecognition({
             voiceFilter.gain.value = 3.5;
             voiceFilter.Q.value = 1.0;
 
+            filterNodesRef.current = [hpFilter, lpFilter, voiceFilter];
+
             // Chain: source -> HP -> Voice Peaking -> LP -> Analyser
             source.connect(hpFilter);
             hpFilter.connect(voiceFilter);
             voiceFilter.connect(lpFilter);
             lpFilter.connect(analyser);
           } else {
+            filterNodesRef.current = [];
             source.connect(analyser);
           }
 

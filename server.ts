@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import type { StoredWebAuthnCredential } from './api/_security.ts';
 import {
   checkRateLimit,
   constantTimeEqual,
@@ -21,7 +22,6 @@ import {
   securityHeadersMiddleware,
   signBiometricBundle,
   signSessionToken,
-  StoredWebAuthnCredential,
   validateAudioPayload,
   validateCustomGeminiKey,
   validateTranslateBody,
@@ -509,7 +509,7 @@ Return ONLY compact JSON:
             temperature: 0.2,
           },
         }),
-        4200,
+        8500,
         'gemini-3.1-flash-lite translate'
       );
     } catch (primaryErr: any) {
@@ -525,22 +525,22 @@ Return ONLY compact JSON:
               thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          5200,
+          8000,
           'gemini-4-hydrogen translate'
         );
       } catch (fallbackErr: any) {
         if (
           (isUnavailableError(fallbackErr) || isUnavailableError(primaryErr)) &&
-          Date.now() - startedAt < 5200
+          Date.now() - startedAt < 9000
         ) {
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, 350));
           response = await withTimeout(
             ai.models.generateContent({
               model: 'gemini-3.1-flash-lite',
               contents: prompt,
               config: { responseMimeType: 'application/json', temperature: 0.2 },
             }),
-            3500,
+            7000,
             'gemini-3.1-flash-lite retry'
           );
         } else {
@@ -567,6 +567,7 @@ Return ONLY compact JSON:
       alternatives: data.alternatives || [],
     });
   } catch (error: any) {
+    console.error('Translation error details:', error?.message || error);
     const status = isQuotaError(error) ? 429 : isUnavailableError(error) ? 503 : 500;
     const message = isQuotaError(error)
       ? 'Se alcanzó temporalmente el límite de solicitudes de traducción. Inténtalo de nuevo en unos segundos.'
@@ -967,42 +968,42 @@ Return ONLY compact JSON:
     let response: any = null;
     let lastError: any = null;
 
-    // 1. Primary: Direct multimodal translation with gemini-3.1-flash-lite
+    // 1. Primary: Direct multimodal translation with gemini-4-hydrogen
     try {
       response = await withTimeout(
         ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
+          model: 'gemini-4-hydrogen',
           contents: {
             parts: [audioPart, { text: promptText }],
           },
           config: {
             responseMimeType: 'application/json',
             temperature: 0.2,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           },
         }),
-        4800,
-        'gemini-3.1-flash-lite audio'
+        9500,
+        'gemini-4-hydrogen audio'
       );
     } catch (primaryErr: any) {
       lastError = primaryErr;
-      console.warn('gemini-3.1-flash-lite audio notice (trying gemini-4-hydrogen)');
+      console.warn('gemini-4-hydrogen audio notice (trying gemini-3.5-transcribe fallback)');
 
-      // 2. Fallback: Direct multimodal translation with gemini-4-hydrogen (low thinking for fast audio response)
+      // 2. Fallback: Audio transcription with gemini-3.5-transcribe
       try {
         response = await withTimeout(
           ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
+            model: 'gemini-3.5-transcribe',
             contents: {
               parts: [audioPart, { text: promptText }],
             },
             config: {
               responseMimeType: 'application/json',
               temperature: 0.2,
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             },
           }),
-          5800,
-          'gemini-4-hydrogen audio'
+          9000,
+          'gemini-3.5-transcribe audio'
         );
       } catch (fallbackErr: any) {
         lastError = fallbackErr;

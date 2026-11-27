@@ -179,6 +179,7 @@ export interface StoredWebAuthnCredential {
   rpId: string;
   createdAt: number;
 }
+export const StoredWebAuthnCredential = {};
 
 export function getRequestHostname(req: express.Request): string {
   const rawHost =
